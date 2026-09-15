@@ -26,6 +26,7 @@ pub struct Range {
 pub enum Command {
     Print,
     Number,
+    Next,
     Quit { force: bool },
 }
 
@@ -59,20 +60,39 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
     let bytes = s.as_bytes();
     let mut i = 0;
     let first = parse_addr(s, &mut i)?;
-    let second = if i < bytes.len() && bytes[i] == b',' {
+    skip_space(s, &mut i);
+    let (first, second) = if i < bytes.len() && bytes[i] == b',' {
+        if first == Some(Address::All) {
+            return Err(ParseError::InvalidAddress);
+        }
         i += 1;
-        parse_addr(s, &mut i)?
+        skip_space(s, &mut i);
+        let second = parse_addr(s, &mut i)?.unwrap_or(Address::Current);
+        if second == Address::All {
+            return Err(ParseError::InvalidAddress);
+        }
+        (Some(first.unwrap_or(Address::Current)), Some(second))
     } else {
-        None
+        (first, None)
     };
+    skip_space(s, &mut i);
     if i >= bytes.len() {
         return Err(ParseError::MissingCommand);
     }
-    let command = match bytes[i] as char {
-        'p' => Command::Print,
-        'n' => Command::Number,
-        'q' => {
+    let start = i;
+    if bytes[i] == b'#' {
+        i += 1;
+    } else {
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
             i += 1;
+        }
+    }
+    let name = &s[start..i];
+    let command = match name {
+        "p" | "pr" | "pri" | "prin" | "print" => Command::Print,
+        "#" | "nu" | "num" | "numb" | "numbe" | "number" => Command::Number,
+        "n" | "ne" | "nex" | "next" => Command::Next,
+        "q" | "qu" | "qui" | "quit" => {
             let force = i < bytes.len() && bytes[i] == b'!';
             if force {
                 i += 1;
@@ -81,9 +101,6 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         }
         _ => return Err(ParseError::UnknownCommand),
     };
-    if !matches!(command, Command::Quit { .. }) {
-        i += 1;
-    }
     if !s[i..].trim().is_empty() {
         return Err(ParseError::UnexpectedArguments);
     }
@@ -94,6 +111,12 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         },
         command,
     })
+}
+
+fn skip_space(s: &str, i: &mut usize) {
+    while *i < s.len() && matches!(s.as_bytes()[*i], b' ' | b'\t') {
+        *i += 1;
+    }
 }
 
 fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
@@ -119,15 +142,21 @@ fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
             while *i < s.len() && s.as_bytes()[*i].is_ascii_digit() {
                 *i += 1;
             }
-            Address::Line(s[start..*i].parse().unwrap())
+            Address::Line(
+                s[start..*i]
+                    .parse()
+                    .map_err(|_| ParseError::InvalidAddress)?,
+            )
         }
-        b' ' | b'\t' | b'p' | b'n' | b'q' => return Ok(None),
-        _ => return Err(ParseError::InvalidAddress),
+        b'+' | b'-' => Address::Current,
+        _ => return Ok(None),
     };
+    skip_space(s, i);
     let mut result = a;
     if *i < s.len() && matches!(s.as_bytes()[*i], b'+' | b'-') {
         let sign = if s.as_bytes()[*i] == b'+' { 1 } else { -1 };
         *i += 1;
+        skip_space(s, i);
         let start = *i;
         while *i < s.len() && s.as_bytes()[*i].is_ascii_digit() {
             *i += 1;
@@ -158,7 +187,7 @@ mod tests {
     use super::*;
     #[test]
     fn parses_commands() {
-        assert_eq!(parse("1,3n").unwrap().command, Command::Number);
+        assert_eq!(parse("1,3nu").unwrap().command, Command::Number);
         assert_eq!(parse("%p").unwrap().range.start, Some(Address::All));
         assert_eq!(parse("q").unwrap().command, Command::Quit { force: false });
         assert_eq!(parse("q!").unwrap().command, Command::Quit { force: true });

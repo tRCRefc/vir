@@ -11,6 +11,7 @@ pub enum AddressError {
     EmptyBuffer,
     OutOfBounds,
     Reversed,
+    InvalidRange,
 }
 
 pub fn evaluate(
@@ -21,6 +22,13 @@ pub fn evaluate(
     if line_count == 0 {
         return Err(AddressError::EmptyBuffer);
     }
+    if current.is_none_or(|n| n >= line_count) {
+        return Err(AddressError::OutOfBounds);
+    }
+    if range.end.is_some() && (range.start == Some(Address::All) || range.end == Some(Address::All))
+    {
+        return Err(AddressError::InvalidRange);
+    }
     let value = |a: Address| -> Result<(usize, usize), AddressError> {
         match a {
             Address::All => Ok((0, line_count - 1)),
@@ -28,20 +36,21 @@ pub fn evaluate(
             Address::Current => current.map(|n| (n, n)).ok_or(AddressError::EmptyBuffer),
             Address::Last => Ok((line_count - 1, line_count - 1)),
             Address::Relative { base, offset } => {
+                // Work in ex's one-based coordinates so 0+1 addresses line 1.
                 let n = match base {
-                    super::parser::BaseAddress::Line(n) => {
-                        n.checked_sub(1).ok_or(AddressError::OutOfBounds)?
-                    }
-                    super::parser::BaseAddress::Current => {
-                        current.ok_or(AddressError::EmptyBuffer)?
-                    }
-                    super::parser::BaseAddress::Last => line_count - 1,
+                    super::parser::BaseAddress::Line(n) => n,
+                    super::parser::BaseAddress::Current => current
+                        .and_then(|n| n.checked_add(1))
+                        .ok_or(AddressError::OutOfBounds)?,
+                    super::parser::BaseAddress::Last => line_count,
                 };
-                let x = n as isize + offset;
-                if x < 0 || x >= line_count as isize {
+                let x = n
+                    .checked_add_signed(offset)
+                    .ok_or(AddressError::OutOfBounds)?;
+                if x == 0 || x > line_count {
                     Err(AddressError::OutOfBounds)
                 } else {
-                    Ok((x as usize, x as usize))
+                    Ok((x - 1, x - 1))
                 }
             }
             _ => Err(AddressError::OutOfBounds),

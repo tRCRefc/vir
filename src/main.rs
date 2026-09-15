@@ -1,14 +1,14 @@
 use std::env;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
-        eprintln!("Usage: {} -opt -filename", &args[0]);
-        return;
+        eprintln!("Usage: {} <unused-opt> <filename>", args[0]);
+        std::process::exit(1);
     }
-    let opt = &args[1];
+    let _opt = &args[1];
     let file_path = &args[2];
 
     let f = File::open(file_path).unwrap_or_else(|error| {
@@ -18,6 +18,12 @@ fn main() {
 
     let reader = BufReader::new(f);
     for line in reader.lines() {
-        println!("{}", line.unwrap());
+        match line {
+            Ok(line) => println!("{line}"),
+            Err(error) => {
+                eprintln!("Unable to read file {file_path}: {error}");
+                std::process::exit(1);
+            }
+        }
     }
 }
