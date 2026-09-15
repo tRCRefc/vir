@@ -157,3 +157,17 @@ fn invalid_bare_addresses_preserve_state() {
     );
     assert!(execute(parse("\n").unwrap(), &mut editor).is_err());
 }
+
+#[test]
+fn repl_runs_commands_and_continues_after_errors() {
+    use std::io::Cursor;
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut input = Cursor::new("1p\n3p\n2\nq\nignored\n");
+    let mut output = Vec::new();
+    vir::ex::repl::run(&mut input, &mut output, &mut editor).unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "one\n? OutOfBounds\ntwo\n"
+    );
+    assert_eq!(editor.current(), Some(1));
+}

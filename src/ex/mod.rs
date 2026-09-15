@@ -3,5 +3,6 @@
 pub mod address;
 pub mod command;
 pub mod parser;
+pub mod repl;
 
 pub use parser::{Address, Command, ParseError, Range};
