@@ -29,6 +29,13 @@ pub fn execute_with_lines(
             quit: false,
         });
     }
+    if parsed.command == Command::Undo {
+        editor.undo().map_err(|e| e.to_string())?;
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
     if parsed.command == Command::PrintNext {
         let next = editor
             .current()
@@ -61,12 +68,27 @@ pub fn execute_with_lines(
         Command::Next => Err("next is not implemented".into()),
         Command::PrintNext => unreachable!(),
         Command::Write => unreachable!(),
+        Command::Undo => unreachable!(),
         Command::Print
         | Command::Number
         | Command::Delete
         | Command::Change
         | Command::Append
         | Command::Insert => {
+            if editor.buffer().is_empty()
+                && matches!(parsed.command, Command::Append | Command::Insert)
+            {
+                if input_lines.is_empty() {
+                    return Err("append/insert requires input".into());
+                }
+                editor
+                    .insert_lines(0, input_lines.iter().cloned())
+                    .map_err(|e| e.to_string())?;
+                return Ok(ResultValue {
+                    output: String::new(),
+                    quit: false,
+                });
+            }
             let buffer = editor.buffer();
             let range = evaluate(parsed.range, buffer.line_count(), editor.current())
                 .map_err(|e| format!("{e:?}"))?;

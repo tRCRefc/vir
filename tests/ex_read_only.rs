@@ -193,3 +193,16 @@ fn editing_commands_change_buffer_and_dot() {
     assert_eq!(editor.current(), Some(1));
     assert!(editor.is_modified());
 }
+
+#[test]
+fn append_and_insert_work_on_empty_buffer() {
+    use std::io::Cursor;
+    for command in ["a", "i"] {
+        let mut editor = Editor::default();
+        let mut input = Cursor::new(format!("{command}\nhello\n.\nq!\n"));
+        let mut output = Vec::new();
+        vir::ex::repl::run(&mut input, &mut output, &mut editor).unwrap();
+        assert_eq!(editor.buffer().to_text(), "hello\n");
+        assert_eq!(editor.current(), Some(0));
+    }
+}

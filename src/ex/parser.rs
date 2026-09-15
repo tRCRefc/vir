@@ -32,6 +32,7 @@ pub enum Command {
     Append,
     Insert,
     Write,
+    Undo,
     Next,
     Quit { force: bool },
 }
@@ -115,6 +116,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         "a" | "ap" | "app" | "appe" | "appen" | "append" => Command::Append,
         "i" | "in" | "ins" | "inse" | "inser" | "insert" => Command::Insert,
         "w" | "wr" | "wri" | "writ" | "write" => Command::Write,
+        "u" | "un" | "und" | "undo" => Command::Undo,
         "n" | "ne" | "nex" | "next" => Command::Next,
         "q" | "qu" | "qui" | "quit" => {
             let force = i < bytes.len() && bytes[i] == b'!';

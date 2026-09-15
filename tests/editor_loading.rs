@@ -120,3 +120,17 @@ fn invalid_cursor_moves_preserve_state_including_empty_buffer() {
         assert_eq!(editor, before);
     }
 }
+
+#[test]
+fn save_establishes_new_undo_baseline() {
+    let dir = TempDir::new();
+    let path = dir.0.join("saved");
+    fs::write(&path, "one\n").unwrap();
+    let mut editor = Editor::default();
+    editor.load(&path).unwrap();
+    editor.insert_lines(1, ["two"]).unwrap();
+    editor.save().unwrap();
+    assert!(!editor.is_modified());
+    assert!(editor.undo().is_err());
+    assert_eq!(fs::read_to_string(path).unwrap(), "one\ntwo\n");
+}

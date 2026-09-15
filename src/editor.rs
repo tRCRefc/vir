@@ -13,6 +13,7 @@ pub struct Editor {
     current: Option<usize>,
     path: Option<PathBuf>,
     modified: bool,
+    undo: Vec<(TextBuffer, Option<usize>, bool)>,
 }
 
 impl Editor {
@@ -51,15 +52,18 @@ impl Editor {
         if new_lines.is_empty() {
             return Ok(());
         }
+        let before = (self.buffer.clone(), self.current, self.modified);
         self.buffer
             .insert_lines(at, new_lines.clone())
             .map_err(str::to_owned)?;
         self.current = Some(at + new_lines.len() - 1);
         self.modified = true;
+        self.undo.push(before);
         Ok(())
     }
 
     pub fn delete_lines(&mut self, start: usize, end: usize) -> Result<(), String> {
+        let before = (self.buffer.clone(), self.current, self.modified);
         self.buffer
             .delete_lines(start, end)
             .map_err(str::to_owned)?;
@@ -69,6 +73,7 @@ impl Editor {
             Some(start.min(self.buffer.line_count() - 1))
         };
         self.modified = true;
+        self.undo.push(before);
         Ok(())
     }
 
@@ -78,6 +83,7 @@ impl Editor {
         S: Into<String>,
     {
         let replacement: Vec<String> = lines.into_iter().map(Into::into).collect();
+        let before = (self.buffer.clone(), self.current, self.modified);
         self.buffer
             .replace_lines(start, end, replacement.clone())
             .map_err(str::to_owned)?;
@@ -89,6 +95,18 @@ impl Editor {
             Some((start + replacement.len() - 1).min(self.buffer.line_count() - 1))
         };
         self.modified = true;
+        self.undo.push(before);
+        Ok(())
+    }
+
+    pub fn undo(&mut self) -> Result<(), String> {
+        let (buffer, current, modified) = self
+            .undo
+            .pop()
+            .ok_or_else(|| "nothing to undo".to_string())?;
+        self.buffer = buffer;
+        self.current = current;
+        self.modified = modified;
         Ok(())
     }
 
@@ -124,6 +142,7 @@ impl Editor {
             .ok_or_else(|| io::Error::other("no file name"))?;
         file_io::save(&path, &self.buffer)?;
         self.modified = false;
+        self.undo.clear();
         Ok(())
     }
 }
@@ -171,5 +190,26 @@ mod tests {
         assert_eq!(editor, before);
         assert!(editor.replace_lines(0, 1, ["bad\nline"]).is_err());
         assert_eq!(editor, before);
+    }
+
+    #[test]
+    fn undo_restores_previous_edit() {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("one\n").unwrap());
+        editor.insert_lines(1, ["two"]).unwrap();
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "one\n");
+        assert!(!editor.is_modified());
+        assert!(editor.undo().is_err());
+    }
+
+    #[test]
+    fn undo_supports_multiple_edits_in_reverse_order() {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("one\n").unwrap());
+        editor.insert_lines(1, ["two"]).unwrap();
+        editor.insert_lines(2, ["three"]).unwrap();
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "one\n");
     }
 }
