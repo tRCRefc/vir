@@ -149,6 +149,11 @@ fn invalid_bare_addresses_preserve_state() {
     let mut empty = Editor::default();
     assert!(execute(parse("1").unwrap(), &mut empty).is_err());
     assert_eq!(empty, Editor::default());
-    // Empty commands are a separate next-line operation, not bare addresses.
-    assert_eq!(parse(" \n"), Err(vir::ex::parser::ParseError::Empty));
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    editor.set_current(0).unwrap();
+    assert_eq!(
+        execute(parse(" ").unwrap(), &mut editor).unwrap().output,
+        "two\n"
+    );
+    assert!(execute(parse("\n").unwrap(), &mut editor).is_err());
 }

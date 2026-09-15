@@ -25,6 +25,7 @@ pub struct Range {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Print,
+    PrintNext,
     Number,
     Next,
     Quit { force: bool },
@@ -55,7 +56,13 @@ impl std::error::Error for ParseError {}
 pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
     let s = input.trim();
     if s.is_empty() {
-        return Err(ParseError::Empty);
+        return Ok(ParsedCommand {
+            range: Range {
+                start: None,
+                end: None,
+            },
+            command: Command::PrintNext,
+        });
     }
     let bytes = s.as_bytes();
     let mut i = 0;
