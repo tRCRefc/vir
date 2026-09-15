@@ -31,6 +31,29 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
             return Ok(());
         }
         let result = match super::parser::parse(&line) {
+            Ok(
+                parsed @ super::parser::ParsedCommand {
+                    command:
+                        super::parser::Command::Change
+                        | super::parser::Command::Append
+                        | super::parser::Command::Insert,
+                    ..
+                },
+            ) => {
+                let mut lines = Vec::new();
+                loop {
+                    line.clear();
+                    if input.read_line(&mut line)? == 0 {
+                        break;
+                    }
+                    let value = line.trim_end_matches(['\n', '\r']);
+                    if value == "." {
+                        break;
+                    }
+                    lines.push(value.to_owned());
+                }
+                super::command::execute_with_lines(parsed, editor, &lines)
+            }
             Ok(parsed) => super::command::execute(parsed, editor),
             Err(error) => Err(error.to_string()),
         };

@@ -19,3 +19,7 @@ pub fn load(path: &Path) -> io::Result<TextBuffer> {
     TextBuffer::from_text(&text)
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))
 }
+
+pub fn save(path: &Path, buffer: &TextBuffer) -> io::Result<()> {
+    fs::write(path, buffer.to_text())
+}

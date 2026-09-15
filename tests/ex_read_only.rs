@@ -181,3 +181,15 @@ fn repl_can_emit_prompts_when_requested() {
     vir::ex::repl::run_with_prompt(&mut input, &mut output, &mut editor, true).unwrap();
     assert_eq!(output, b":");
 }
+
+#[test]
+fn editing_commands_change_buffer_and_dot() {
+    use std::io::Cursor;
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut input = Cursor::new("1c\nONE\n.\n1a\nAFTER\n.\n1i\nBEFORE\n.\n2d\nq\n");
+    let mut output = Vec::new();
+    vir::ex::repl::run(&mut input, &mut output, &mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "BEFORE\nAFTER\ntwo\n");
+    assert_eq!(editor.current(), Some(1));
+    assert!(editor.is_modified());
+}

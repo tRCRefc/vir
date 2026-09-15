@@ -27,6 +27,11 @@ pub enum Command {
     Print,
     PrintNext,
     Number,
+    Delete,
+    Change,
+    Append,
+    Insert,
+    Write,
     Next,
     Quit { force: bool },
 }
@@ -105,6 +110,11 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
     let command = match name {
         "p" | "pr" | "pri" | "prin" | "print" => Command::Print,
         "#" | "nu" | "num" | "numb" | "numbe" | "number" => Command::Number,
+        "d" | "de" | "del" | "dele" | "delet" | "delete" => Command::Delete,
+        "c" | "ch" | "cha" | "chan" | "chang" | "change" => Command::Change,
+        "a" | "ap" | "app" | "appe" | "appen" | "append" => Command::Append,
+        "i" | "in" | "ins" | "inse" | "inser" | "insert" => Command::Insert,
+        "w" | "wr" | "wri" | "writ" | "write" => Command::Write,
         "n" | "ne" | "nex" | "next" => Command::Next,
         "q" | "qu" | "qui" | "quit" => {
             let force = i < bytes.len() && bytes[i] == b'!';
