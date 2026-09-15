@@ -112,3 +112,43 @@ fn extreme_addresses_and_invalid_state_return_errors() {
         );
     }
 }
+
+#[test]
+fn bare_addresses_print_ranges_and_update_dot() {
+    // ex_cmds.c: caseline with addr2 set -> plines(addr1, addr2, 1).
+    for (input, output, current) in [
+        ("2", "two\n", 1),
+        (" 1,2 \n", "one\ntwo\n", 1),
+        (".", "two\n", 1),
+        ("$", "three\n", 2),
+        ("%", "one\ntwo\nthree\n", 2),
+        ("+", "three\n", 2),
+        ("1,", "one\ntwo\n", 1),
+    ] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
+        editor.set_current(1).unwrap();
+        let result = execute(parse(input).unwrap(), &mut editor).unwrap();
+        assert_eq!(result.output, output, "{input}");
+        assert!(!result.quit);
+        assert_eq!(editor.current(), Some(current));
+        assert!(!editor.is_modified());
+    }
+}
+
+#[test]
+fn invalid_bare_addresses_preserve_state() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let before = editor.clone();
+    for input in ["0", "3", "2,1", "$+1"] {
+        assert!(
+            execute(parse(input).unwrap(), &mut editor).is_err(),
+            "{input}"
+        );
+        assert_eq!(editor, before);
+    }
+    let mut empty = Editor::default();
+    assert!(execute(parse("1").unwrap(), &mut empty).is_err());
+    assert_eq!(empty, Editor::default());
+    // Empty commands are a separate next-line operation, not bare addresses.
+    assert_eq!(parse(" \n"), Err(vir::ex::parser::ParseError::Empty));
+}

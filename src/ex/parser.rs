@@ -77,7 +77,14 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
     };
     skip_space(s, &mut i);
     if i >= bytes.len() {
-        return Err(ParseError::MissingCommand);
+        // ex_cmds.c: a newline after explicit addresses prints that range.
+        return Ok(ParsedCommand {
+            range: Range {
+                start: first,
+                end: second,
+            },
+            command: Command::Print,
+        });
     }
     let start = i;
     if bytes[i] == b'#' {
