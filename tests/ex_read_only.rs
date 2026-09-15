@@ -171,3 +171,13 @@ fn repl_runs_commands_and_continues_after_errors() {
     );
     assert_eq!(editor.current(), Some(1));
 }
+
+#[test]
+fn repl_can_emit_prompts_when_requested() {
+    use std::io::Cursor;
+    let mut input = Cursor::new("q\n");
+    let mut output = Vec::new();
+    let mut editor = Editor::default();
+    vir::ex::repl::run_with_prompt(&mut input, &mut output, &mut editor, true).unwrap();
+    assert_eq!(output, b":");
+}
