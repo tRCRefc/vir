@@ -9,14 +9,21 @@ use crate::buffer::TextBuffer;
 /// Load UTF-8/LF text, or start an empty buffer for a nonexistent path.
 /// Other I/O errors and unsupported text formats are returned to the caller.
 pub fn load(path: &Path) -> io::Result<TextBuffer> {
+    load_with_origin(path).map(|(buffer, _)| buffer)
+}
+
+/// Report whether bytes were loaded, so a new buffer cannot overwrite a file
+/// created by another process between opening and its first save.
+pub(crate) fn load_with_origin(path: &Path) -> io::Result<(TextBuffer, bool)> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(TextBuffer::default());
+            return Ok((TextBuffer::default(), false));
         }
         Err(error) => return Err(error),
     };
     TextBuffer::from_text(&text)
+        .map(|buffer| (buffer, true))
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))
 }
 

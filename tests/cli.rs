@@ -224,3 +224,44 @@ fn ex_substitution_undo_save_and_error_recovery() {
     );
     assert_eq!(std::fs::read_to_string(path).unwrap(), "dog dog\ndog\n");
 }
+
+#[test]
+fn help_explains_supported_workflow_without_starting_editor() {
+    for flag in ["--help", "-h"] {
+        let output = run(&[flag], b"");
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("vir --ex [file ...]"));
+        assert!(text.contains("EOF exits without saving"));
+        assert!(text.contains("not historical vi BRE"));
+    }
+}
+
+#[test]
+fn s4_combined_session_preserves_export_undo_and_file_switch_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    let part = dir.path().join("part");
+    std::fs::write(&first, "cat cat\ncat\n").unwrap();
+    std::fs::write(&second, "cat next\n").unwrap();
+    let script = format!(
+        "%s/cat/dog/g\n1w {}\nn\nu\n%p\nu\n%w\nn\n//\ns//fox/g\nwq {}/missing/file\nq\n%p\nwq\n",
+        part.display(),
+        dir.path().display()
+    );
+    let output = run(
+        &["--ex", first.to_str().unwrap(), second.to_str().unwrap()],
+        script.as_bytes(),
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.starts_with("? unsaved changes\ncat cat\ncat\ncat next\n? "));
+    assert!(text.ends_with("? unsaved changes\nfox next\n"));
+    assert_eq!(std::fs::read_to_string(first).unwrap(), "dog dog\ndog\n");
+    assert_eq!(std::fs::read_to_string(second).unwrap(), "fox next\n");
+    assert_eq!(std::fs::read_to_string(part).unwrap(), "dog dog\n");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+}

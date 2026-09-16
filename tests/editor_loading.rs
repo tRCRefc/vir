@@ -284,3 +284,26 @@ fn safe_save_rejects_a_directory_that_replaced_the_target() {
     assert!(target.is_dir());
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
 }
+
+#[test]
+fn new_buffer_first_save_does_not_overwrite_a_later_created_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("new");
+    let mut editor = Editor::default();
+    editor.load(&path).unwrap();
+    editor.insert_lines(0, ["editor content"]).unwrap();
+    let before = editor.clone();
+    fs::write(&path, "external content\n").unwrap();
+    assert!(editor.save().is_err());
+    assert_eq!(editor, before);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "external content\n");
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    fs::remove_file(&path).unwrap();
+    editor.save().unwrap();
+    editor.insert_lines(1, ["second save"]).unwrap();
+    editor.save().unwrap();
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "editor content\nsecond save\n"
+    );
+}

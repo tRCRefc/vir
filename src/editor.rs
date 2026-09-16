@@ -146,10 +146,10 @@ impl Editor {
         if self.modified && !force {
             return Err(io::Error::other("unsaved changes"));
         }
-        let buffer = file_io::load(path)?;
+        let (buffer, existed) = file_io::load_with_origin(path)?;
         let mut loaded = Self::from_buffer(buffer);
         loaded.path = Some(path.to_owned());
-        loaded.path_writable = true;
+        loaded.path_writable = existed;
         loaded.arguments = self.arguments.clone();
         loaded.argument_index = self.argument_index;
         loaded.warned_remaining = self.warned_remaining;
