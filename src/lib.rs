@@ -4,3 +4,4 @@ pub mod buffer;
 pub mod editor;
 pub mod ex;
 pub mod file_io;
+pub mod visual;

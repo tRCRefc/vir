@@ -265,3 +265,13 @@ fn s4_combined_session_preserves_export_undo_and_file_switch_state() {
     assert_eq!(std::fs::read_to_string(part).unwrap(), "dog dog\n");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
 }
+
+#[test]
+fn visual_rejects_pipes_and_extra_files_without_terminal_sequences() {
+    for args in [vec!["--vi"], vec!["--vi", "one", "two"]] {
+        let output = run(&args, b"");
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.contains(&0x1b));
+    }
+}

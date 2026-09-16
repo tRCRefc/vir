@@ -9,6 +9,24 @@ fn main() {
         print!("{}", include_str!("help.txt"));
         return;
     }
+    if args.get(1).map(String::as_str) == Some("--vi") {
+        if args.len() > 3 {
+            eprintln!("Usage: {} --vi [file]", args[0]);
+            std::process::exit(1);
+        }
+        let mut editor = vir::editor::Editor::default();
+        if let Some(path) = args.get(2)
+            && let Err(error) = editor.load(std::path::Path::new(path))
+        {
+            eprintln!("Unable to load file: {error}");
+            std::process::exit(1);
+        }
+        if let Err(error) = vir::visual::run(&mut editor) {
+            eprintln!("visual: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("--ex") {
         let mut editor = vir::editor::Editor::default();
         let paths = args.iter().skip(2).map(PathBuf::from).collect();

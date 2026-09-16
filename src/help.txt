@@ -1,7 +1,8 @@
-vir - basic ex line editor (visual mode is not implemented)
+vir - basic ex editor and read-only visual browser
 
 Usage:
   vir --ex [file ...]   Edit UTF-8/LF files; missing files start empty
+  vir --vi [file]      Browse a file in a terminal (read-only)
   vir --help           Show this help
   vir -h               Show this help
 
@@ -54,8 +55,17 @@ Behavior and limits:
   directory crash durability and external-edit conflict protection are
   not guaranteed. A newly opened missing target cannot overwrite a file
   that appears before its first save.
-- No visual UI, full BRE compatibility, macros, next-with-new-list,
+- No visual editing, full BRE compatibility, macros, next-with-new-list,
   substitution confirmation, multi-line replacement, or recovery yet.
 
 Legacy: vir <unused-opt> <filename> prints a file without editing it.
 This old two-argument entry point is retained; use --ex for editing.
+
+Visual browser (--vi): requires terminal stdin and stdout. Use hjkl or
+arrow keys, 0/$ (Home/End), g/G (first/last line), PageUp/PageDown or
+Ctrl-B/Ctrl-F. q or Ctrl-C exits. No : commands or search input yet.
+Long lines scroll horizontally; Tab stops are 8 columns. Controls display
+as caret notation; zero-width characters show a replacement glyph.
+Movement uses Unicode scalars, not grapheme clusters; complex emoji and
+combining sequences are not fully supported. The last terminal column is
+reserved to avoid autowrap. This browser never writes the file.
