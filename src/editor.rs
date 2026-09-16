@@ -14,6 +14,9 @@ pub struct Editor {
     path: Option<PathBuf>,
     modified: bool,
     path_writable: bool,
+    arguments: Vec<PathBuf>,
+    argument_index: Option<usize>,
+    warned_remaining: Option<usize>,
     undo: Option<(TextBuffer, Option<usize>)>,
 }
 
@@ -146,7 +149,70 @@ impl Editor {
         let mut loaded = Self::from_buffer(buffer);
         loaded.path = Some(path.to_owned());
         loaded.path_writable = true;
+        loaded.arguments = self.arguments.clone();
+        loaded.argument_index = self.argument_index;
+        loaded.warned_remaining = self.warned_remaining;
         *self = loaded;
+        Ok(())
+    }
+
+    /// Initialize a file-list session only after its first file loads.
+    pub fn open_arguments(&mut self, paths: Vec<PathBuf>) -> io::Result<()> {
+        let mut loaded = Self::default();
+        if self.modified {
+            return Err(io::Error::other("unsaved changes"));
+        }
+        if let Some(first) = paths.first() {
+            loaded.load(first)?;
+            loaded.argument_index = Some(0);
+        }
+        loaded.arguments = paths;
+        *self = loaded;
+        Ok(())
+    }
+
+    pub fn arguments(&self) -> &[PathBuf] {
+        &self.arguments
+    }
+    pub fn argument_index(&self) -> Option<usize> {
+        self.argument_index
+    }
+
+    pub fn next_file(&mut self, force: bool) -> io::Result<()> {
+        if self.modified && !force {
+            return Err(io::Error::other("unsaved changes"));
+        }
+        let next = self.argument_index.map_or(0, |index| index + 1);
+        let path = self
+            .arguments
+            .get(next)
+            .ok_or_else(|| io::Error::other("no more files"))?
+            .clone();
+        self.load_with_force(&path, force)?;
+        self.argument_index = Some(next);
+        self.warned_remaining = None;
+        Ok(())
+    }
+
+    /// Like ex nomore: warn once for the current remaining file count.
+    pub fn check_quit(&mut self, force: bool) -> Result<(), String> {
+        if force {
+            return Ok(());
+        }
+        if self.modified {
+            return Err("unsaved changes".into());
+        }
+        let remaining = self
+            .arguments
+            .len()
+            .saturating_sub(self.argument_index.map_or(0, |n| n + 1));
+        if remaining > 0 && self.warned_remaining != Some(remaining) {
+            self.warned_remaining = Some(remaining);
+            return Err(format!(
+                "{remaining} more file{} to edit",
+                if remaining == 1 { "" } else { "s" }
+            ));
+        }
         Ok(())
     }
 

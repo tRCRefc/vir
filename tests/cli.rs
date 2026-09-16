@@ -33,16 +33,11 @@ fn ex_without_file_accepts_quit_and_clean_eof() {
 }
 
 #[test]
-fn ex_rejects_extra_arguments_and_load_errors() {
-    for args in [
-        vec!["--ex", "one", "two"],
-        vec!["--ex", env!("CARGO_MANIFEST_DIR")],
-    ] {
-        let output = run(&args, b"");
-        assert!(!output.status.success());
-        assert!(output.stdout.is_empty());
-        assert!(!output.stderr.is_empty());
-    }
+fn ex_rejects_initial_load_errors() {
+    let output = run(&["--ex", env!("CARGO_MANIFEST_DIR")], b"");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
 }
 
 #[test]
@@ -163,4 +158,30 @@ fn ex_partial_write_quit_keeps_session_open_until_full_save() {
         std::fs::read_to_string(current).unwrap(),
         "one\ntwo\nthree\n"
     );
+}
+
+#[test]
+fn ex_cli_file_list_switches_and_marks_current_argument() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first file");
+    let second = dir.path().join("second");
+    std::fs::write(&first, "first\n").unwrap();
+    std::fs::write(&second, "second\n").unwrap();
+    let output = run(
+        &["--ex", first.to_str().unwrap(), second.to_str().unwrap()],
+        b"args\nq\na\nunsaved\n.\nn\nn!\nargs\n%p\nn\nq\n",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!(
+            "[{}] {}\n? 1 more file to edit\n? unsaved changes\n{} [{}]\nsecond\n? no more files\n",
+            first.display(),
+            second.display(),
+            first.display(),
+            second.display()
+        )
+    );
+    assert_eq!(std::fs::read_to_string(first).unwrap(), "first\n");
 }

@@ -16,13 +16,13 @@ fn original_command_names_and_number_format() {
         assert_eq!(editor.current(), Some(2));
     }
     for name in ["n", "next"] {
-        assert_eq!(parse(name).unwrap().command, Command::Next);
+        assert_eq!(parse(name).unwrap().command, Command::Next { force: false });
         let mut editor = Editor::from_buffer(buffer.clone());
         editor.set_current(0).unwrap();
         assert!(
             execute(parse(name).unwrap(), &mut editor)
                 .unwrap_err()
-                .contains("not implemented")
+                .contains("no more files")
         );
         assert_eq!(editor.current(), Some(0));
     }

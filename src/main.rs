@@ -1,20 +1,15 @@
 use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
-use std::path::Path;
+use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.get(1).map(String::as_str) == Some("--ex") {
-        if args.len() > 3 {
-            eprintln!("Usage: {} --ex [file]", args[0]);
-            std::process::exit(1);
-        }
         let mut editor = vir::editor::Editor::default();
-        if let Some(path) = args.get(2)
-            && let Err(error) = editor.load(Path::new(path))
-        {
-            eprintln!("Unable to load {path}: {error}");
+        let paths = args.iter().skip(2).map(PathBuf::from).collect();
+        if let Err(error) = editor.open_arguments(paths) {
+            eprintln!("Unable to load file: {error}");
             std::process::exit(1);
         }
         if let Err(error) = vir::ex::repl::run(
@@ -28,7 +23,10 @@ fn main() {
         return;
     }
     if args.len() != 3 {
-        eprintln!("Usage: {} <unused-opt> <filename>", args[0]);
+        eprintln!(
+            "Usage: {} --ex [file ...] (legacy: <unused-opt> <filename>)",
+            args[0]
+        );
         std::process::exit(1);
     }
     let _opt = &args[1];

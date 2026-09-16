@@ -36,7 +36,8 @@ pub enum Command {
     Edit { force: bool },
     File,
     Undo,
-    Next,
+    Next { force: bool },
+    Args,
     Quit { force: bool },
 }
 
@@ -132,7 +133,14 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             Command::Edit { force }
         }
         "u" | "un" | "und" | "undo" => Command::Undo,
-        "n" | "ne" | "nex" | "next" => Command::Next,
+        "ar" | "arg" | "args" => Command::Args,
+        "n" | "ne" | "nex" | "next" => {
+            let force = i < bytes.len() && bytes[i] == b'!';
+            if force {
+                i += 1;
+            }
+            Command::Next { force }
+        }
         "q" | "qu" | "qui" | "quit" => {
             let force = i < bytes.len() && bytes[i] == b'!';
             if force {

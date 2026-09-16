@@ -14,7 +14,8 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
     let addressed = parsed.range.start.is_some() || parsed.range.end.is_some();
     match parsed.command {
         Command::Quit { .. }
-        | Command::Next
+        | Command::Next { .. }
+        | Command::Args
         | Command::Undo
         | Command::PrintNext
         | Command::Edit { .. }
@@ -68,8 +69,8 @@ pub fn execute_with_lines(
         editor
             .write_range_to(parsed.path.as_deref().map(std::path::Path::new), range)
             .map_err(|e| e.to_string())?;
-        if parsed.command == Command::WriteQuit && editor.is_modified() {
-            return Err("unsaved changes".into());
+        if parsed.command == Command::WriteQuit {
+            editor.check_quit(false)?;
         }
         return Ok(ResultValue {
             output: String::new(),
@@ -144,15 +145,37 @@ pub fn execute_with_lines(
     }
     match parsed.command {
         Command::Quit { force } => {
-            if editor.is_modified() && !force {
-                return Err("unsaved changes".into());
-            }
+            editor.check_quit(force)?;
             Ok(ResultValue {
                 output: String::new(),
                 quit: true,
             })
         }
-        Command::Next => Err("next is not implemented".into()),
+        Command::Next { force } => {
+            editor.next_file(force).map_err(|e| e.to_string())?;
+            Ok(ResultValue {
+                output: String::new(),
+                quit: false,
+            })
+        }
+        Command::Args => {
+            let entries: Vec<String> = editor
+                .arguments()
+                .iter()
+                .enumerate()
+                .map(|(index, path)| {
+                    if editor.argument_index() == Some(index) {
+                        format!("[{}]", path.display())
+                    } else {
+                        path.display().to_string()
+                    }
+                })
+                .collect();
+            Ok(ResultValue {
+                output: format!("{}\n", entries.join(" ")),
+                quit: false,
+            })
+        }
         Command::PrintNext => unreachable!(),
         Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File => {
             unreachable!()
