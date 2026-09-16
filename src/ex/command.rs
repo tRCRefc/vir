@@ -44,7 +44,11 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
             )
             .map_err(|e| format!("{e:?}"))?;
         }
-        Command::Print | Command::Number | Command::Delete | Command::Change => {
+        Command::Substitute
+        | Command::Print
+        | Command::Number
+        | Command::Delete
+        | Command::Change => {
             evaluate(
                 parsed.range.clone(),
                 editor.buffer().line_count(),
@@ -66,6 +70,32 @@ pub fn execute_with_lines(
     input_lines: &[String],
 ) -> Result<ResultValue, String> {
     let (parsed, pattern) = super::search::resolve(parsed, editor)?;
+    if parsed.command == Command::Substitute {
+        validate_addresses(&parsed, editor)?;
+        let spec = parsed
+            .substitution
+            .as_ref()
+            .ok_or_else(|| "missing substitution".to_owned())?;
+        let range = evaluate(
+            parsed.range.clone(),
+            editor.buffer().line_count(),
+            editor.current(),
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        super::substitute::execute(
+            spec,
+            range,
+            pattern
+                .as_deref()
+                .or(editor.last_search())
+                .map(str::to_owned),
+            editor,
+        )?;
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
     let result = execute_resolved(parsed, editor, input_lines)?;
     if let Some(pattern) = pattern {
         editor.remember_search(pattern);
@@ -165,6 +195,7 @@ fn execute_resolved(
                 },
                 command: Command::Print,
                 path: None,
+                substitution: None,
             },
             editor,
         );
@@ -202,7 +233,7 @@ fn execute_resolved(
                 quit: false,
             })
         }
-        Command::PrintNext => unreachable!(),
+        Command::PrintNext | Command::Substitute => unreachable!(),
         Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File => {
             unreachable!()
         }

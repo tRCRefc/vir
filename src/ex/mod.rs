@@ -8,3 +8,4 @@ pub mod repl;
 pub use parser::{Address, Command, ParseError, Range};
 
 pub mod search;
+pub mod substitute;

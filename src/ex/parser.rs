@@ -32,6 +32,7 @@ pub struct Range {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
+    Substitute,
     Print,
     PrintNext,
     Number,
@@ -54,6 +55,14 @@ pub struct ParsedCommand {
     pub range: Range,
     pub command: Command,
     pub path: Option<String>,
+    pub substitution: Option<Substitution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Substitution {
+    pub pattern: String,
+    pub replacement: String,
+    pub global: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +91,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             },
             command: Command::PrintNext,
             path: None,
+            substitution: None,
         });
     }
     let bytes = s.as_bytes();
@@ -112,6 +122,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             },
             command: Command::Print,
             path: None,
+            substitution: None,
         });
     }
     let start = i;
@@ -123,6 +134,44 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         }
     }
     let name = &s[start..i];
+    if matches!(
+        name,
+        "s" | "su"
+            | "sub"
+            | "subs"
+            | "subst"
+            | "substi"
+            | "substit"
+            | "substitu"
+            | "substitut"
+            | "substitute"
+    ) {
+        skip_space(s, &mut i);
+        if s.as_bytes().get(i) != Some(&b'/') {
+            return Err(ParseError::UnexpectedArguments);
+        }
+        i += 1;
+        let pattern = substitution_part(s, &mut i, true)?;
+        let replacement = substitution_part(s, &mut i, false)?;
+        let global = match s[i..].trim() {
+            "" => false,
+            "g" => true,
+            _ => return Err(ParseError::UnexpectedArguments),
+        };
+        return Ok(ParsedCommand {
+            range: Range {
+                start: first,
+                end: second,
+            },
+            command: Command::Substitute,
+            path: None,
+            substitution: Some(Substitution {
+                pattern,
+                replacement,
+                global,
+            }),
+        });
+    }
     let command = match name {
         "p" | "pr" | "pri" | "prin" | "print" => Command::Print,
         "#" | "nu" | "num" | "numb" | "numbe" | "number" => Command::Number,
@@ -182,7 +231,39 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         },
         command,
         path,
+        substitution: None,
     })
+}
+
+fn substitution_part(s: &str, i: &mut usize, pattern: bool) -> Result<String, ParseError> {
+    let mut value = String::new();
+    while *i < s.len() {
+        let c = s[*i..].chars().next().unwrap();
+        *i += c.len_utf8();
+        if c == '/' {
+            return Ok(value);
+        }
+        if matches!(c, '\r' | '\n' | '\0') {
+            return Err(ParseError::UnexpectedArguments);
+        }
+        if c == '\\' {
+            let next = s[*i..]
+                .chars()
+                .next()
+                .ok_or(ParseError::UnexpectedArguments)?;
+            *i += next.len_utf8();
+            if matches!(next, '\r' | '\n' | '\0') {
+                return Err(ParseError::UnexpectedArguments);
+            }
+            if !pattern || next != '/' {
+                value.push('\\');
+            }
+            value.push(next);
+        } else {
+            value.push(c);
+        }
+    }
+    Err(ParseError::UnexpectedArguments)
 }
 
 fn skip_space(s: &str, i: &mut usize) {

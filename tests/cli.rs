@@ -206,3 +206,21 @@ fn ex_search_addresses_print_edit_and_recover_from_no_match() {
         "one\ntarget\nlast\n"
     );
 }
+
+#[test]
+fn ex_substitution_undo_save_and_error_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file");
+    std::fs::write(&path, "cat cat\ncat\n").unwrap();
+    let output = run(
+        &["--ex", path.to_str().unwrap()],
+        b"%s/cat/dog/g\n%p\nu\n%p\nu\ns/missing/x/\n%wq\n",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        output.stdout,
+        b"dog dog\ndog\ncat cat\ncat\n? pattern not found\n"
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "dog dog\ndog\n");
+}
