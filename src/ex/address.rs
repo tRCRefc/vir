@@ -12,6 +12,7 @@ pub enum AddressError {
     OutOfBounds,
     Reversed,
     InvalidRange,
+    SearchRequiresBuffer,
 }
 
 pub fn evaluate(
@@ -62,6 +63,7 @@ fn evaluate_coordinates(
         let n = match a {
             Address::All if line_count > 0 => return Ok((1, line_count)),
             Address::All => return Err(AddressError::EmptyBuffer),
+            Address::Search { .. } => return Err(AddressError::SearchRequiresBuffer),
             Address::Line(n) => n,
             Address::Current => dot,
             Address::Last => line_count,

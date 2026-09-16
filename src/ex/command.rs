@@ -11,6 +11,7 @@ pub struct ResultValue {
 /// Validate addresses without changing editor state or consuming input.
 /// Explicit write ranges must name existing lines.
 pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(), String> {
+    let (parsed, _) = super::search::resolve(parsed.clone(), editor)?;
     let addressed = parsed.range.start.is_some() || parsed.range.end.is_some();
     match parsed.command {
         Command::Quit { .. }
@@ -26,13 +27,17 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
         }
         Command::Write | Command::WriteQuit => {
             if addressed {
-                evaluate(parsed.range, editor.buffer().line_count(), editor.current())
-                    .map_err(|e| format!("{e:?}"))?;
+                evaluate(
+                    parsed.range.clone(),
+                    editor.buffer().line_count(),
+                    editor.current(),
+                )
+                .map_err(|e| format!("{e:?}"))?;
             }
         }
         Command::Append | Command::Insert => {
             insertion_index(
-                parsed.range,
+                parsed.range.clone(),
                 editor.buffer().line_count(),
                 editor.current(),
                 parsed.command == Command::Append,
@@ -40,8 +45,12 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
             .map_err(|e| format!("{e:?}"))?;
         }
         Command::Print | Command::Number | Command::Delete | Command::Change => {
-            evaluate(parsed.range, editor.buffer().line_count(), editor.current())
-                .map_err(|e| format!("{e:?}"))?;
+            evaluate(
+                parsed.range.clone(),
+                editor.buffer().line_count(),
+                editor.current(),
+            )
+            .map_err(|e| format!("{e:?}"))?;
         }
     }
     Ok(())
@@ -56,12 +65,29 @@ pub fn execute_with_lines(
     editor: &mut Editor,
     input_lines: &[String],
 ) -> Result<ResultValue, String> {
+    let (parsed, pattern) = super::search::resolve(parsed, editor)?;
+    let result = execute_resolved(parsed, editor, input_lines)?;
+    if let Some(pattern) = pattern {
+        editor.remember_search(pattern);
+    }
+    Ok(result)
+}
+
+fn execute_resolved(
+    parsed: ParsedCommand,
+    editor: &mut Editor,
+    input_lines: &[String],
+) -> Result<ResultValue, String> {
     validate_addresses(&parsed, editor)?;
     if matches!(parsed.command, Command::Write | Command::WriteQuit) {
         let range = if parsed.range.start.is_some() || parsed.range.end.is_some() {
             Some(
-                evaluate(parsed.range, editor.buffer().line_count(), editor.current())
-                    .map_err(|e| format!("{e:?}"))?,
+                evaluate(
+                    parsed.range.clone(),
+                    editor.buffer().line_count(),
+                    editor.current(),
+                )
+                .map_err(|e| format!("{e:?}"))?,
             )
         } else {
             None
@@ -189,7 +215,7 @@ pub fn execute_with_lines(
         | Command::Insert => {
             if matches!(parsed.command, Command::Append | Command::Insert) {
                 let at = insertion_index(
-                    parsed.range,
+                    parsed.range.clone(),
                     editor.buffer().line_count(),
                     editor.current(),
                     parsed.command == Command::Append,
@@ -204,7 +230,7 @@ pub fn execute_with_lines(
                 });
             }
             let buffer = editor.buffer();
-            let range = evaluate(parsed.range, buffer.line_count(), editor.current())
+            let range = evaluate(parsed.range.clone(), buffer.line_count(), editor.current())
                 .map_err(|e| format!("{e:?}"))?;
             if parsed.command == Command::Delete {
                 editor

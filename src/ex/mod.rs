@@ -6,3 +6,5 @@ pub mod parser;
 pub mod repl;
 
 pub use parser::{Address, Command, ParseError, Range};
+
+pub mod search;

@@ -185,3 +185,24 @@ fn ex_cli_file_list_switches_and_marks_current_argument() {
     );
     assert_eq!(std::fs::read_to_string(first).unwrap(), "first\n");
 }
+
+#[test]
+fn ex_search_addresses_print_edit_and_recover_from_no_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file");
+    std::fs::write(&path, "one\ntarget\nlast\n").unwrap();
+    let output = run(
+        &["--ex", path.to_str().unwrap()],
+        b"/target/\n/missing/\n??\n/target/d\n%p\nu\n//\nq!\n",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        output.stdout,
+        b"target\n? pattern not found\ntarget\none\nlast\ntarget\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "one\ntarget\nlast\n"
+    );
+}

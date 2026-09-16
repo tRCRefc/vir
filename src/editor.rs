@@ -17,6 +17,7 @@ pub struct Editor {
     arguments: Vec<PathBuf>,
     argument_index: Option<usize>,
     warned_remaining: Option<usize>,
+    last_search: Option<String>,
     undo: Option<(TextBuffer, Option<usize>)>,
 }
 
@@ -152,6 +153,7 @@ impl Editor {
         loaded.arguments = self.arguments.clone();
         loaded.argument_index = self.argument_index;
         loaded.warned_remaining = self.warned_remaining;
+        loaded.last_search = self.last_search.clone();
         *self = loaded;
         Ok(())
     }
@@ -169,6 +171,13 @@ impl Editor {
         loaded.arguments = paths;
         *self = loaded;
         Ok(())
+    }
+
+    pub fn last_search(&self) -> Option<&str> {
+        self.last_search.as_deref()
+    }
+    pub(crate) fn remember_search(&mut self, pattern: String) {
+        self.last_search = Some(pattern);
     }
 
     pub fn arguments(&self) -> &[PathBuf] {

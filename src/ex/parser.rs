@@ -1,12 +1,20 @@
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Address {
     Line(usize),
     Current,
     Last,
     All,
-    Relative { base: BaseAddress, offset: isize },
+    Search {
+        pattern: String,
+        forward: bool,
+        offset: isize,
+    },
+    Relative {
+        base: BaseAddress,
+        offset: isize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +24,7 @@ pub enum BaseAddress {
     Last,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Range {
     pub start: Option<Address>,
     pub end: Option<Address>,
@@ -189,6 +197,41 @@ fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
     }
     let b = s.as_bytes()[*i];
     let a = match b {
+        b'/' | b'?' => {
+            *i += 1;
+            let mut pattern = String::new();
+            loop {
+                if *i >= s.len() {
+                    return Err(ParseError::InvalidAddress);
+                }
+                let c = s[*i..].chars().next().unwrap();
+                *i += c.len_utf8();
+                if c == b as char {
+                    break;
+                }
+                if c == '\\' {
+                    let escaped = s[*i..].chars().next().ok_or(ParseError::InvalidAddress)?;
+                    *i += escaped.len_utf8();
+                    if escaped == b as char {
+                        if escaped == '?' {
+                            pattern.push_str("\\?");
+                        } else {
+                            pattern.push(escaped);
+                        }
+                    } else {
+                        pattern.push('\\');
+                        pattern.push(escaped);
+                    }
+                } else {
+                    pattern.push(c);
+                }
+            }
+            Address::Search {
+                pattern,
+                forward: b == b'/',
+                offset: 0,
+            }
+        }
         b'.' => {
             *i += 1;
             Address::Current
@@ -216,7 +259,7 @@ fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
         _ => return Ok(None),
     };
     skip_space(s, i);
-    let mut result = a;
+    let mut result = a.clone();
     if *i < s.len() && matches!(s.as_bytes()[*i], b'+' | b'-') {
         let sign = if s.as_bytes()[*i] == b'+' { 1 } else { -1 };
         *i += 1;
@@ -232,6 +275,16 @@ fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
                 .parse()
                 .map_err(|_| ParseError::InvalidAddress)?
         };
+        if let Address::Search {
+            pattern, forward, ..
+        } = a
+        {
+            return Ok(Some(Address::Search {
+                pattern,
+                forward,
+                offset: sign * n,
+            }));
+        }
         let base = match a {
             Address::Line(n) => BaseAddress::Line(n),
             Address::Current => BaseAddress::Current,
