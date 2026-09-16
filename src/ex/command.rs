@@ -9,7 +9,7 @@ pub struct ResultValue {
 }
 
 /// Validate addresses without changing editor state or consuming input.
-/// Explicit write ranges are rejected until partial writes are implemented.
+/// Explicit write ranges must name existing lines.
 pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(), String> {
     let addressed = parsed.range.start.is_some() || parsed.range.end.is_some();
     match parsed.command {
@@ -25,7 +25,8 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
         }
         Command::Write | Command::WriteQuit => {
             if addressed {
-                return Err("write ranges are not supported".into());
+                evaluate(parsed.range, editor.buffer().line_count(), editor.current())
+                    .map_err(|e| format!("{e:?}"))?;
             }
         }
         Command::Append | Command::Insert => {
@@ -56,9 +57,20 @@ pub fn execute_with_lines(
 ) -> Result<ResultValue, String> {
     validate_addresses(&parsed, editor)?;
     if matches!(parsed.command, Command::Write | Command::WriteQuit) {
+        let range = if parsed.range.start.is_some() || parsed.range.end.is_some() {
+            Some(
+                evaluate(parsed.range, editor.buffer().line_count(), editor.current())
+                    .map_err(|e| format!("{e:?}"))?,
+            )
+        } else {
+            None
+        };
         editor
-            .write_to(parsed.path.as_deref().map(std::path::Path::new))
+            .write_range_to(parsed.path.as_deref().map(std::path::Path::new), range)
             .map_err(|e| e.to_string())?;
+        if parsed.command == Command::WriteQuit && editor.is_modified() {
+            return Err("unsaved changes".into());
+        }
         return Ok(ResultValue {
             output: String::new(),
             quit: parsed.command == Command::WriteQuit,

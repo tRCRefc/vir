@@ -143,3 +143,24 @@ fn ex_file_workflow_and_failed_wq_continue_the_session() {
     assert_eq!(std::fs::read_to_string(first).unwrap(), "first\n");
     assert_eq!(std::fs::read_to_string(second).unwrap(), "second\n");
 }
+
+#[test]
+fn ex_partial_write_quit_keeps_session_open_until_full_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let current = dir.path().join("current");
+    let export = dir.path().join("export");
+    std::fs::write(&current, "one\ntwo\n").unwrap();
+    let script = format!("a\nthree\n.\n1w\n1wq {}\n%p\n%wq\n", export.display());
+    let output = run(&["--ex", current.to_str().unwrap()], script.as_bytes());
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        output.stdout,
+        b"? cannot write partial buffer to current file\n? unsaved changes\none\ntwo\nthree\n"
+    );
+    assert_eq!(std::fs::read_to_string(export).unwrap(), "one\n");
+    assert_eq!(
+        std::fs::read_to_string(current).unwrap(),
+        "one\ntwo\nthree\n"
+    );
+}

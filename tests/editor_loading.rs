@@ -142,7 +142,7 @@ fn save_preserves_reversible_undo_and_undo_marks_modified() {
 }
 
 #[test]
-fn addressed_writes_do_not_touch_disk_or_editor_history() {
+fn invalid_or_partial_writes_do_not_touch_disk_or_editor_history() {
     let dir = TempDir::new();
     let path = dir.0.join("saved");
     fs::write(&path, "original\n").unwrap();
@@ -150,11 +150,8 @@ fn addressed_writes_do_not_touch_disk_or_editor_history() {
     editor.load(&path).unwrap();
     editor.insert_lines(1, ["unsaved"]).unwrap();
     let before = editor.clone();
-    for command in ["1w", "%w", "1,2w", "999w", "2,1w", "0w"] {
-        assert_eq!(
-            execute(parse(command).unwrap(), &mut editor).unwrap_err(),
-            "write ranges are not supported"
-        );
+    for command in ["1w", "999w", "2,1w", "0w"] {
+        assert!(execute(parse(command).unwrap(), &mut editor).is_err());
         assert_eq!(editor, before);
         assert_eq!(fs::read_to_string(&path).unwrap(), "original\n");
     }

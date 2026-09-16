@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::buffer::TextBuffer;
-use crate::ex::address::AddressError;
+use crate::ex::address::{AddressError, LineRange};
 use crate::file_io;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -164,15 +164,57 @@ impl Editor {
     /// Writing another file exports a copy without renaming the current buffer.
     /// An unnamed buffer adopts its first successful write destination.
     pub fn write_to(&mut self, destination: Option<&Path>) -> io::Result<()> {
+        self.write_range_to(destination, None)
+    }
+
+    /// An explicit inclusive range exports selected lines. Only a full write
+    /// clears modified; partial writes never replace the current destination.
+    pub fn write_range_to(
+        &mut self,
+        destination: Option<&Path>,
+        range: Option<LineRange>,
+    ) -> io::Result<()> {
+        let full = match range {
+            None => true,
+            Some(range) => {
+                if range.start > range.end || range.end >= self.buffer.line_count() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid write range",
+                    ));
+                }
+                range.start == 0 && range.end + 1 == self.buffer.line_count()
+            }
+        };
         let path = destination
             .or(self.path())
             .ok_or_else(|| io::Error::other("no file name"))?
             .to_owned();
         let current = self.path.as_deref() == Some(path.as_path());
-        if current && self.path_writable {
-            file_io::save(&path, &self.buffer)?;
+        if current && !full {
+            return Err(io::Error::other(
+                "cannot write partial buffer to current file",
+            ));
+        }
+        let selected;
+        let buffer = if full {
+            &self.buffer
         } else {
-            file_io::save_new(&path, &self.buffer)?;
+            let range = range.expect("partial write has a range");
+            let mut text = String::new();
+            for index in range.start..=range.end {
+                text.push_str(self.buffer.line(index).expect("validated range"));
+                if index + 1 < self.buffer.line_count() || self.buffer.has_trailing_newline() {
+                    text.push('\n');
+                }
+            }
+            selected = TextBuffer::from_text(&text).map_err(io::Error::other)?;
+            &selected
+        };
+        if current && self.path_writable {
+            file_io::save(&path, buffer)?;
+        } else {
+            file_io::save_new(&path, buffer)?;
         }
         if self.path.is_none() {
             self.path = Some(path);
@@ -181,7 +223,9 @@ impl Editor {
             self.path_writable = true;
         }
         // A full-buffer write clears modified even when exporting, like ex.
-        self.modified = false;
+        if full {
+            self.modified = false;
+        }
         Ok(())
     }
 }
