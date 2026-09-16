@@ -13,7 +13,8 @@ pub struct Editor {
     current: Option<usize>,
     path: Option<PathBuf>,
     modified: bool,
-    undo: Vec<(TextBuffer, Option<usize>, bool)>,
+    path_writable: bool,
+    undo: Option<(TextBuffer, Option<usize>)>,
 }
 
 impl Editor {
@@ -49,32 +50,27 @@ impl Editor {
         S: Into<String>,
     {
         let new_lines: Vec<String> = lines.into_iter().map(Into::into).collect();
+        if at > self.buffer.line_count() {
+            return Err("line insertion index out of bounds".into());
+        }
         if new_lines.is_empty() {
             return Ok(());
         }
-        let before = (self.buffer.clone(), self.current, self.modified);
-        self.buffer
-            .insert_lines(at, new_lines.clone())
-            .map_err(str::to_owned)?;
-        self.current = Some(at + new_lines.len() - 1);
-        self.modified = true;
-        self.undo.push(before);
-        Ok(())
+        self.edit(move |buffer| {
+            let count = new_lines.len();
+            buffer.insert_lines(at, new_lines)?;
+            Ok(Some(at + count - 1))
+        })
     }
 
     pub fn delete_lines(&mut self, start: usize, end: usize) -> Result<(), String> {
-        let before = (self.buffer.clone(), self.current, self.modified);
-        self.buffer
-            .delete_lines(start, end)
-            .map_err(str::to_owned)?;
-        self.current = if self.buffer.is_empty() {
-            None
-        } else {
-            Some(start.min(self.buffer.line_count() - 1))
-        };
-        self.modified = true;
-        self.undo.push(before);
-        Ok(())
+        self.edit(|buffer| {
+            buffer.delete_lines(start, end)?;
+            Ok(buffer
+                .line_count()
+                .checked_sub(1)
+                .map(|last| start.min(last)))
+        })
     }
 
     pub fn replace_lines<I, S>(&mut self, start: usize, end: usize, lines: I) -> Result<(), String>
@@ -83,30 +79,44 @@ impl Editor {
         S: Into<String>,
     {
         let replacement: Vec<String> = lines.into_iter().map(Into::into).collect();
-        let before = (self.buffer.clone(), self.current, self.modified);
-        self.buffer
-            .replace_lines(start, end, replacement.clone())
-            .map_err(str::to_owned)?;
-        self.current = if self.buffer.is_empty() {
-            None
-        } else if replacement.is_empty() {
-            Some(start.saturating_sub(1).min(self.buffer.line_count() - 1))
-        } else {
-            Some((start + replacement.len() - 1).min(self.buffer.line_count() - 1))
-        };
+        self.edit(move |buffer| {
+            let count = replacement.len();
+            buffer.replace_lines(start, end, replacement)?;
+            Ok(buffer.line_count().checked_sub(1).map(|last| {
+                if count == 0 {
+                    start.saturating_sub(1).min(last)
+                } else {
+                    (start + count - 1).min(last)
+                }
+            }))
+        })
+    }
+
+    /// Publish one complete edit only after validation succeeds. Failed edits
+    /// preserve the text, cursor, modified flag and reversible undo snapshot.
+    fn edit(
+        &mut self,
+        apply: impl FnOnce(&mut TextBuffer) -> Result<Option<usize>, &'static str>,
+    ) -> Result<(), String> {
+        let mut buffer = self.buffer.clone();
+        let current = apply(&mut buffer).map_err(str::to_owned)?;
+        let previous = std::mem::replace(&mut self.buffer, buffer);
+        self.undo = Some((previous, self.current));
+        self.current = current;
         self.modified = true;
-        self.undo.push(before);
         Ok(())
     }
 
+    /// Original ex undo is its own inverse; it is a change even if it restores
+    /// saved text. Saving leaves this snapshot available.
     pub fn undo(&mut self) -> Result<(), String> {
-        let (buffer, current, modified) = self
+        let (buffer, current) = self
             .undo
-            .pop()
+            .as_mut()
             .ok_or_else(|| "nothing to undo".to_string())?;
-        self.buffer = buffer;
-        self.current = current;
-        self.modified = modified;
+        std::mem::swap(&mut self.buffer, buffer);
+        std::mem::swap(&mut self.current, current);
+        self.modified = true;
         Ok(())
     }
 
@@ -125,24 +135,53 @@ impl Editor {
     /// Replace the current file only after a complete successful load.
     /// Missing files become clean empty buffers with a target path.
     pub fn load(&mut self, path: &Path) -> io::Result<()> {
-        if self.modified {
+        self.load_with_force(path, false)
+    }
+
+    pub fn load_with_force(&mut self, path: &Path, force: bool) -> io::Result<()> {
+        if self.modified && !force {
             return Err(io::Error::other("unsaved changes"));
         }
         let buffer = file_io::load(path)?;
         let mut loaded = Self::from_buffer(buffer);
         loaded.path = Some(path.to_owned());
+        loaded.path_writable = true;
         *self = loaded;
         Ok(())
     }
 
+    pub fn set_path(&mut self, path: &Path) {
+        if self.path.as_deref() != Some(path) {
+            self.path = Some(path.to_owned());
+            self.path_writable = false;
+        }
+    }
+
     pub fn save(&mut self) -> io::Result<()> {
-        let path = self
-            .path
-            .clone()
-            .ok_or_else(|| io::Error::other("no file name"))?;
-        file_io::save(&path, &self.buffer)?;
+        self.write_to(None)
+    }
+
+    /// Writing another file exports a copy without renaming the current buffer.
+    /// An unnamed buffer adopts its first successful write destination.
+    pub fn write_to(&mut self, destination: Option<&Path>) -> io::Result<()> {
+        let path = destination
+            .or(self.path())
+            .ok_or_else(|| io::Error::other("no file name"))?
+            .to_owned();
+        let current = self.path.as_deref() == Some(path.as_path());
+        if current && self.path_writable {
+            file_io::save(&path, &self.buffer)?;
+        } else {
+            file_io::save_new(&path, &self.buffer)?;
+        }
+        if self.path.is_none() {
+            self.path = Some(path);
+            self.path_writable = true;
+        } else if current {
+            self.path_writable = true;
+        }
+        // A full-buffer write clears modified even when exporting, like ex.
         self.modified = false;
-        self.undo.clear();
         Ok(())
     }
 }
@@ -198,18 +237,19 @@ mod tests {
         editor.insert_lines(1, ["two"]).unwrap();
         editor.undo().unwrap();
         assert_eq!(editor.buffer().to_text(), "one\n");
-        assert!(!editor.is_modified());
-        assert!(editor.undo().is_err());
+        assert!(editor.is_modified());
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
     }
 
     #[test]
-    fn undo_supports_multiple_edits_in_reverse_order() {
+    fn undo_toggles_only_the_latest_edit() {
         let mut editor = Editor::from_buffer(TextBuffer::from_text("one\n").unwrap());
         editor.insert_lines(1, ["two"]).unwrap();
         editor.insert_lines(2, ["three"]).unwrap();
         editor.undo().unwrap();
         assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
         editor.undo().unwrap();
-        assert_eq!(editor.buffer().to_text(), "one\n");
+        assert_eq!(editor.buffer().to_text(), "one\ntwo\nthree\n");
     }
 }

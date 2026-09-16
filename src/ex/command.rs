@@ -1,4 +1,4 @@
-use super::address::evaluate;
+use super::address::{evaluate, insertion_index};
 use super::parser::{Command, ParsedCommand};
 use crate::editor::Editor;
 
@@ -6,6 +6,43 @@ use crate::editor::Editor;
 pub struct ResultValue {
     pub output: String,
     pub quit: bool,
+}
+
+/// Validate addresses without changing editor state or consuming input.
+/// Explicit write ranges are rejected until partial writes are implemented.
+pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(), String> {
+    let addressed = parsed.range.start.is_some() || parsed.range.end.is_some();
+    match parsed.command {
+        Command::Quit { .. }
+        | Command::Next
+        | Command::Undo
+        | Command::PrintNext
+        | Command::Edit { .. }
+        | Command::File => {
+            if addressed {
+                return Err("command does not accept addresses".into());
+            }
+        }
+        Command::Write | Command::WriteQuit => {
+            if addressed {
+                return Err("write ranges are not supported".into());
+            }
+        }
+        Command::Append | Command::Insert => {
+            insertion_index(
+                parsed.range,
+                editor.buffer().line_count(),
+                editor.current(),
+                parsed.command == Command::Append,
+            )
+            .map_err(|e| format!("{e:?}"))?;
+        }
+        Command::Print | Command::Number | Command::Delete | Command::Change => {
+            evaluate(parsed.range, editor.buffer().line_count(), editor.current())
+                .map_err(|e| format!("{e:?}"))?;
+        }
+    }
+    Ok(())
 }
 
 pub fn execute(parsed: ParsedCommand, editor: &mut Editor) -> Result<ResultValue, String> {
@@ -17,15 +54,52 @@ pub fn execute_with_lines(
     editor: &mut Editor,
     input_lines: &[String],
 ) -> Result<ResultValue, String> {
-    if matches!(parsed.command, Command::Quit { .. } | Command::Next)
-        && (parsed.range.start.is_some() || parsed.range.end.is_some())
-    {
-        return Err("command does not accept addresses".into());
-    }
-    if parsed.command == Command::Write {
-        editor.save().map_err(|e| e.to_string())?;
+    validate_addresses(&parsed, editor)?;
+    if matches!(parsed.command, Command::Write | Command::WriteQuit) {
+        editor
+            .write_to(parsed.path.as_deref().map(std::path::Path::new))
+            .map_err(|e| e.to_string())?;
         return Ok(ResultValue {
             output: String::new(),
+            quit: parsed.command == Command::WriteQuit,
+        });
+    }
+    if let Command::Edit { force } = parsed.command {
+        let path = parsed
+            .path
+            .as_deref()
+            .map(std::path::Path::new)
+            .or(editor.path())
+            .ok_or_else(|| "no file name".to_owned())?
+            .to_owned();
+        editor
+            .load_with_force(&path, force)
+            .map_err(|e| e.to_string())?;
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
+    if parsed.command == Command::File {
+        if let Some(path) = &parsed.path {
+            editor.set_path(std::path::Path::new(path));
+        }
+        let name = editor
+            .path()
+            .map(|p| format!("\"{}\"", p.display()))
+            .unwrap_or_else(|| "No file".into());
+        return Ok(ResultValue {
+            output: format!(
+                "{}{} line {} of {}\n",
+                name,
+                if editor.is_modified() {
+                    " [Modified]"
+                } else {
+                    ""
+                },
+                editor.current().map_or(0, |n| n + 1),
+                editor.buffer().line_count()
+            ),
             quit: false,
         });
     }
@@ -51,6 +125,7 @@ pub fn execute_with_lines(
                     end: None,
                 },
                 command: Command::Print,
+                path: None,
             },
             editor,
         );
@@ -67,7 +142,9 @@ pub fn execute_with_lines(
         }
         Command::Next => Err("next is not implemented".into()),
         Command::PrintNext => unreachable!(),
-        Command::Write => unreachable!(),
+        Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File => {
+            unreachable!()
+        }
         Command::Undo => unreachable!(),
         Command::Print
         | Command::Number
@@ -75,14 +152,16 @@ pub fn execute_with_lines(
         | Command::Change
         | Command::Append
         | Command::Insert => {
-            if editor.buffer().is_empty()
-                && matches!(parsed.command, Command::Append | Command::Insert)
-            {
-                if input_lines.is_empty() {
-                    return Err("append/insert requires input".into());
-                }
+            if matches!(parsed.command, Command::Append | Command::Insert) {
+                let at = insertion_index(
+                    parsed.range,
+                    editor.buffer().line_count(),
+                    editor.current(),
+                    parsed.command == Command::Append,
+                )
+                .map_err(|e| format!("{e:?}"))?;
                 editor
-                    .insert_lines(0, input_lines.iter().cloned())
+                    .insert_lines(at, input_lines.iter().cloned())
                     .map_err(|e| e.to_string())?;
                 return Ok(ResultValue {
                     output: String::new(),
@@ -102,28 +181,8 @@ pub fn execute_with_lines(
                 });
             }
             if parsed.command == Command::Change {
-                if input_lines.is_empty() {
-                    return Err("change requires input".into());
-                }
                 editor
                     .replace_lines(range.start, range.end, input_lines.iter().cloned())
-                    .map_err(|e| e.to_string())?;
-                return Ok(ResultValue {
-                    output: String::new(),
-                    quit: false,
-                });
-            }
-            if matches!(parsed.command, Command::Append | Command::Insert) {
-                if input_lines.is_empty() {
-                    return Err("append/insert requires input".into());
-                }
-                let at = if parsed.command == Command::Append {
-                    range.end + 1
-                } else {
-                    range.start
-                };
-                editor
-                    .insert_lines(at, input_lines.iter().cloned())
                     .map_err(|e| e.to_string())?;
                 return Ok(ResultValue {
                     output: String::new(),

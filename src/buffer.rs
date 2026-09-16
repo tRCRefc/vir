@@ -91,9 +91,7 @@ impl TextBuffer {
             return Err("replacement lines must not contain line endings");
         }
         self.lines.splice(start..=end, replacement);
-        if !self.lines.is_empty() {
-            self.trailing_newline = true;
-        }
+        self.trailing_newline = !self.lines.is_empty();
         Ok(())
     }
 

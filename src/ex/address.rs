@@ -22,53 +22,75 @@ pub fn evaluate(
     if line_count == 0 {
         return Err(AddressError::EmptyBuffer);
     }
-    if current.is_none_or(|n| n >= line_count) {
-        return Err(AddressError::OutOfBounds);
-    }
+    let (start, end) = evaluate_coordinates(range, line_count, current, false)?;
+    Ok(LineRange {
+        start: start - 1,
+        end: end - 1,
+    })
+}
+
+/// Resolve append/insert to a zero-based gap, including an empty buffer.
+/// Append accepts address zero; insert uses the last addressed line, like ex.
+/// Empty-buffer insert is an intentional extension of the original nonzero rule.
+pub fn insertion_index(
+    range: Range,
+    line_count: usize,
+    current: Option<usize>,
+    append: bool,
+) -> Result<usize, AddressError> {
+    let (_, end) = evaluate_coordinates(range, line_count, current, append || line_count == 0)?;
+    Ok(if append { end } else { end.saturating_sub(1) })
+}
+
+/// Evaluate in ex coordinates: 1..=line_count, with zero allowed only by policy.
+fn evaluate_coordinates(
+    range: Range,
+    line_count: usize,
+    current: Option<usize>,
+    allow_zero: bool,
+) -> Result<(usize, usize), AddressError> {
+    let dot = match (line_count, current) {
+        (0, None) => 0,
+        (_, Some(n)) if n < line_count => n + 1,
+        _ => return Err(AddressError::OutOfBounds),
+    };
     if range.end.is_some() && (range.start == Some(Address::All) || range.end == Some(Address::All))
     {
         return Err(AddressError::InvalidRange);
     }
     let value = |a: Address| -> Result<(usize, usize), AddressError> {
-        match a {
-            Address::All => Ok((0, line_count - 1)),
-            Address::Line(n) if n > 0 && n <= line_count => Ok((n - 1, n - 1)),
-            Address::Current => current.map(|n| (n, n)).ok_or(AddressError::EmptyBuffer),
-            Address::Last => Ok((line_count - 1, line_count - 1)),
+        let n = match a {
+            Address::All if line_count > 0 => return Ok((1, line_count)),
+            Address::All => return Err(AddressError::EmptyBuffer),
+            Address::Line(n) => n,
+            Address::Current => dot,
+            Address::Last => line_count,
             Address::Relative { base, offset } => {
-                // Work in ex's one-based coordinates so 0+1 addresses line 1.
                 let n = match base {
                     super::parser::BaseAddress::Line(n) => n,
-                    super::parser::BaseAddress::Current => current
-                        .and_then(|n| n.checked_add(1))
-                        .ok_or(AddressError::OutOfBounds)?,
+                    super::parser::BaseAddress::Current => dot,
                     super::parser::BaseAddress::Last => line_count,
                 };
-                let x = n
-                    .checked_add_signed(offset)
-                    .ok_or(AddressError::OutOfBounds)?;
-                if x == 0 || x > line_count {
-                    Err(AddressError::OutOfBounds)
-                } else {
-                    Ok((x - 1, x - 1))
-                }
+                n.checked_add_signed(offset)
+                    .ok_or(AddressError::OutOfBounds)?
             }
-            _ => Err(AddressError::OutOfBounds),
+        };
+        if n > line_count || (n == 0 && !allow_zero) {
+            Err(AddressError::OutOfBounds)
+        } else {
+            Ok((n, n))
         }
     };
-    let (s, e) = match (range.start, range.end) {
-        (None, None) => {
-            let n = current.ok_or(AddressError::EmptyBuffer)?;
-            (n, n)
-        }
+    let (start, end) = match (range.start, range.end) {
+        (None, None) => value(Address::Current)?,
         (Some(a), None) => value(a)?,
         (Some(a), Some(b)) => (value(a)?.0, value(b)?.1),
-        (None, Some(_)) => return Err(AddressError::OutOfBounds),
+        (None, Some(_)) => return Err(AddressError::InvalidRange),
     };
-    if s > e {
+    if start > end {
         Err(AddressError::Reversed)
     } else {
-        Ok(LineRange { start: s, end: e })
+        Ok((start, end))
     }
 }
 

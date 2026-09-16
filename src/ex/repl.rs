@@ -4,7 +4,9 @@ use std::io::{self, BufRead, Write};
 
 use crate::editor::Editor;
 
-/// Run commands until q or clean EOF. Command errors are printed and the loop continues.
+/// Run a script until q or EOF, including EOF with unsaved changes.
+/// Command errors are printed and the loop continues. Input errors abort the
+/// current edit. Like original gettty, input EOF commits complete lines only.
 pub fn run<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -30,7 +32,13 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
         if input.read_line(&mut line)? == 0 {
             return Ok(());
         }
-        let result = match super::parser::parse(&line) {
+        let parsed = super::parser::parse(&line)
+            .map_err(|error| error.to_string())
+            .and_then(|parsed| {
+                super::command::validate_addresses(&parsed, editor)?;
+                Ok(parsed)
+            });
+        let result = match parsed {
             Ok(
                 parsed @ super::parser::ParsedCommand {
                     command:
@@ -46,7 +54,12 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
                     if input.read_line(&mut line)? == 0 {
                         break;
                     }
-                    let value = line.trim_end_matches(['\n', '\r']);
+                    // gettty discards a partial last line at EOF. Accept CRLF
+                    // as a transport delimiter without stripping content CRs.
+                    let Some(value) = line.strip_suffix('\n') else {
+                        break;
+                    };
+                    let value = value.strip_suffix('\r').unwrap_or(value);
                     if value == "." {
                         break;
                     }
@@ -55,7 +68,7 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
                 super::command::execute_with_lines(parsed, editor, &lines)
             }
             Ok(parsed) => super::command::execute(parsed, editor),
-            Err(error) => Err(error.to_string()),
+            Err(error) => Err(error),
         };
         match result {
             Ok(result) => {

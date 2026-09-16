@@ -32,15 +32,19 @@ pub enum Command {
     Append,
     Insert,
     Write,
+    WriteQuit,
+    Edit { force: bool },
+    File,
     Undo,
     Next,
     Quit { force: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedCommand {
     pub range: Range,
     pub command: Command,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +72,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
                 end: None,
             },
             command: Command::PrintNext,
+            path: None,
         });
     }
     let bytes = s.as_bytes();
@@ -97,6 +102,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
                 end: second,
             },
             command: Command::Print,
+            path: None,
         });
     }
     let start = i;
@@ -116,6 +122,15 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         "a" | "ap" | "app" | "appe" | "appen" | "append" => Command::Append,
         "i" | "in" | "ins" | "inse" | "inser" | "insert" => Command::Insert,
         "w" | "wr" | "wri" | "writ" | "write" => Command::Write,
+        "wq" => Command::WriteQuit,
+        "f" | "fi" | "fil" | "file" => Command::File,
+        "e" | "ed" | "edi" | "edit" => {
+            let force = i < bytes.len() && bytes[i] == b'!';
+            if force {
+                i += 1;
+            }
+            Command::Edit { force }
+        }
         "u" | "un" | "und" | "undo" => Command::Undo,
         "n" | "ne" | "nex" | "next" => Command::Next,
         "q" | "qu" | "qui" | "quit" => {
@@ -127,15 +142,30 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         }
         _ => return Err(ParseError::UnknownCommand),
     };
-    if !s[i..].trim().is_empty() {
+    let rest = &s[i..];
+    let path = if rest.is_empty() {
+        None
+    } else if matches!(
+        command,
+        Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File
+    ) && rest.starts_with([' ', '\t'])
+    {
+        // One literal path; no shell expansion or command chaining.
+        let path = rest.trim();
+        if path.contains(['\n', '\r', '\0']) || path.starts_with(['!', '>']) {
+            return Err(ParseError::UnexpectedArguments);
+        }
+        Some(path.to_owned())
+    } else {
         return Err(ParseError::UnexpectedArguments);
-    }
+    };
     Ok(ParsedCommand {
         range: Range {
             start: first,
             end: second,
         },
         command,
+        path,
     })
 }
 
