@@ -1,8 +1,8 @@
-vir - basic ex editor and read-only visual browser
+vir - basic ex editor and visual browser with ex save commands
 
 Usage:
   vir --ex [file ...]   Edit UTF-8/LF files; missing files start empty
-  vir --vi [file]      Browse a file in a terminal (read-only)
+  vir --vi [file]      Browse a file in a terminal
   vir --help           Show this help
   vir -h               Show this help
 
@@ -63,9 +63,18 @@ This old two-argument entry point is retained; use --ex for editing.
 
 Visual browser (--vi): requires terminal stdin and stdout. Use hjkl or
 arrow keys, 0/$ (Home/End), g/G (first/last line), PageUp/PageDown or
-Ctrl-B/Ctrl-F. q or Ctrl-C exits. No : commands or search input yet.
+Ctrl-B/Ctrl-F. q or Ctrl-C checks for unsaved changes before exiting.
+Type : to enter w [path], q, q!, or wq [path]; write ranges follow ex
+semantics. Enter executes; Backspace removes a character; Esc or Ctrl-C
+cancels command input. Errors appear on the bottom line. Other ex commands
+are not supported in visual mode yet. / or ? starts forward/backward
+regex search; Enter submits the raw pattern (no closing delimiter or
+offset), empty input reuses the last pattern. n repeats, N reverses the
+last explicit direction. Searches wrap and move to matching characters;
+failed searches preserve the cursor and history. No search highlighting.
 Long lines scroll horizontally; Tab stops are 8 columns. Controls display
 as caret notation; zero-width characters show a replacement glyph.
 Movement uses Unicode scalars, not grapheme clusters; complex emoji and
 combining sequences are not fully supported. The last terminal column is
-reserved to avoid autowrap. This browser never writes the file.
+reserved to avoid autowrap. Browsing never changes text; explicit :w or
+:wq commands can write files. Visual text editing is not implemented yet.

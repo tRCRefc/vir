@@ -1,4 +1,5 @@
-//! Read-only visual frontend. Layout is independent of terminal I/O.
+//! Visual browser with ex save/quit commands. Layout is independent of terminal I/O.
+mod search;
 mod terminal;
 use crate::buffer::TextBuffer;
 pub use terminal::run;
@@ -26,6 +27,7 @@ pub struct VisualState {
     pub top: usize,
     pub left: usize,
     preferred_column: usize,
+    search_forward: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -160,7 +162,7 @@ impl VisualState {
             .collect();
         let status = clip(
             &format!(
-                "[VIEW] {name}  {}/{}  col {}  q:quit",
+                "[VIEW] {name}  {}/{}  col {}  :command q:quit",
                 if buffer.is_empty() { 0 } else { self.row + 1 },
                 buffer.line_count(),
                 self.column + 1

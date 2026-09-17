@@ -75,3 +75,74 @@ fn empty_buffer_stays_valid_and_browsing_does_not_mutate_text() {
     assert!(frame.status.contains("0/0"));
     assert_eq!(buffer, TextBuffer::default());
 }
+
+#[test]
+fn searches_find_same_line_unicode_overlaps_wrap_and_preserve_direction() {
+    use vir::editor::Editor;
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("中ababa\nnone\naba\n").unwrap());
+    let mut state = VisualState::default();
+    state.search(&mut editor, "aba", true).unwrap();
+    assert_eq!((state.row, state.column), (0, 1));
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (0, 3));
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (2, 0));
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (0, 1));
+    state.repeat_search(&mut editor, true).unwrap();
+    assert_eq!((state.row, state.column), (2, 0));
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (0, 1));
+    state.search(&mut editor, "", false).unwrap();
+    assert_eq!((state.row, state.column), (2, 0));
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (0, 3));
+    assert_eq!(editor.current(), Some(0));
+    assert!(!editor.is_modified());
+    let frame = state.frame(editor.buffer(), "file", 4, 2);
+    assert!(frame.cursor.unwrap().0 < 3);
+    state.move_cursor(Motion::Down, editor.buffer(), 4);
+    assert_eq!(state.column, 3);
+}
+
+#[test]
+fn failed_searches_preserve_editor_cursor_viewport_and_direction() {
+    use vir::editor::Editor;
+    let mut editor = Editor::default();
+    let mut state = VisualState::default();
+    assert!(state.repeat_search(&mut editor, false).is_err());
+    assert!(state.search(&mut editor, "x", true).is_err());
+    assert_eq!(editor, Editor::default());
+    editor.insert_lines(0, ["x x", "tail"]).unwrap();
+    state.search(&mut editor, "x", true).unwrap();
+    state.frame(editor.buffer(), "file", 3, 2);
+    let before = editor.clone();
+    let visual_before = format!("{state:?}");
+    for pattern in ["[", "missing"] {
+        assert!(state.search(&mut editor, pattern, false).is_err());
+        assert_eq!(editor, before);
+        assert_eq!(format!("{state:?}"), visual_before);
+    }
+    editor.undo().unwrap();
+    assert!(editor.buffer().is_empty());
+}
+
+#[test]
+fn anchors_zero_width_empty_lines_and_shared_ex_history() {
+    use vir::{
+        editor::Editor,
+        ex::{command::execute, parser::parse},
+    };
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("abc\n\n中\n").unwrap());
+    let mut state = VisualState::default();
+    state.search(&mut editor, "$", true).unwrap();
+    assert_eq!((state.row, state.column), (0, 2));
+    state.search(&mut editor, "^$", true).unwrap();
+    assert_eq!((state.row, state.column), (1, 0));
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (1, 0));
+    execute(parse("/中/p").unwrap(), &mut editor).unwrap();
+    state.repeat_search(&mut editor, false).unwrap();
+    assert_eq!((state.row, state.column), (2, 0));
+    assert_eq!(editor.last_search(), Some("中"));
+}

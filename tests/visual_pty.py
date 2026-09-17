@@ -42,7 +42,7 @@ def session(path, quit_key):
         receive(master, b"FIRST-LINE")
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 4, 40, 0, 0))
         os.kill(process.pid, signal.SIGWINCH)
-        receive(master, b"[VIEW]")
+        receive(master, b"\x1b[4;1H[VIEW]")
         os.write(master, quit_key)
         assert process.wait(timeout=5) == 0
         receive(master, b"\x1b[?1049l")
@@ -56,6 +56,64 @@ def session(path, quit_key):
         os.close(slave)
 
 
+def command_session(path, quit_command):
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    export = path.parent / "中文 export"
+    try:
+        receive(master, b"[VIEW]")
+        os.write(master, b"/LAST-LINE\r")
+        receive(master, b"22/22  col 1")
+        os.write(master, b"?FIRST-LINE\r")
+        receive(master, b"1/22  col 1")
+        os.write(master, b"/missing\r")
+        receive(master, b"? pattern not found")
+        os.write(master, b"/\r")
+        receive(master, b"1/22  col 1")
+        os.write(master, b"nN")
+        receive(master, b"1/22  col 1")
+        os.write(master, b"/ignored")
+        receive(master, b"/ignored")
+        os.write(master, b"\x03")
+        receive(master, b"[VIEW]")
+        os.write(master, b":d\r")
+        receive(master, b"? visual supports only")
+        os.write(master, f":w {path.parent}\r".encode())
+        receive(master, b"? ")
+        assert process.poll() is None
+        os.write(master, b":w")
+        receive(master, b"\x1b[8;1H:w\x1b[")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        # Resize during input and cancel with Ctrl-C without exiting.
+        os.write(master, b":w")
+        receive(master, b"\x1b[8;1H:w\x1b[")
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 4, 20, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[4;1H:w\x1b[")
+        os.write(master, b"\x03")
+        receive(master, b"[VIEW]")
+        assert process.poll() is None
+        # Unicode path plus a typo removed using Backspace.
+        os.write(master, f":w {export}X".encode() + b"\x7f\r")
+        receive(master, b"Written")
+        assert export.read_bytes() == path.read_bytes()
+        os.write(master, quit_command)
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+        export.unlink(missing_ok=True)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
     path = Path(directory) / "text"
     content = "FIRST-LINE\n" + "中\ttext\n" * 20 + "LAST-LINE\n"
@@ -63,7 +121,10 @@ with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
     for quit_key in [b"q", b"\x03"]:
         session(path, quit_key)
         assert path.read_text() == content
-print("PTY: browse, resize, q/Ctrl-C, terminal restoration and unchanged file passed")
+    for quit_command in [b":q\r", b":q!\r", b":wq\r"]:
+        command_session(path, quit_command)
+        assert path.read_text() == content
+print("PTY: browse, command input/save/error recovery, resize, exits and terminal restoration passed")
 
 # Exercise RAII cleanup on injected errors and unwinding panics in a real PTY.
 master, slave = pty.openpty()
