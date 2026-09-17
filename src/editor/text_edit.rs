@@ -29,6 +29,17 @@ impl TextEdit<'_> {
         self.cursor
     }
 
+    pub fn open_line_below(&mut self) -> Result<(), String> {
+        let row = if self.draft.is_empty() {
+            0
+        } else {
+            self.cursor.row + 1
+        };
+        self.draft.insert_lines(row, [""]).map_err(str::to_owned)?;
+        self.cursor = Position { row, column: 0 };
+        Ok(())
+    }
+
     pub fn insert(&mut self, text: &str) -> Result<(), String> {
         self.cursor = self
             .draft

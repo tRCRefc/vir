@@ -159,7 +159,58 @@ def editing_session(directory):
         os.close(slave)
 
 
+def insert_session(directory):
+    path = directory / "inserted"
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"[VIEW]")
+        os.write(master, "i中X".encode())
+        receive(master, b"col 3")
+        os.write(master, b"\x7f\rsecond")
+        receive(master, b"2/2  col 7")
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 4, 30, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[4;1H[INSERT]")
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 100, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[6;1H[INSERT]")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"u")
+        receive(master, b"0/0  col 1")
+        os.write(master, b"u")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"Ga!\x03")
+        receive(master, b"[VIEW] [+]")
+        assert process.poll() is None
+        os.write(master, b"oTHIRD\x1b")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"x")
+        receive(master, b"THIR")
+        os.write(master, b":q\r")
+        receive(master, b"? unsaved changes")
+        os.write(master, f":w {directory}\r".encode())
+        receive(master, b"? ")
+        assert process.poll() is None
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "中\ns!econd\nTHIR\n", path.read_text()
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    insert_session(Path(directory))
     editing_session(Path(directory))
     path = Path(directory) / "text"
     content = "FIRST-LINE\n" + "中\ttext\n" * 20 + "LAST-LINE\n"

@@ -55,7 +55,7 @@ Behavior and limits:
   directory crash durability and external-edit conflict protection are
   not guaranteed. A newly opened missing target cannot overwrite a file
   that appears before its first save.
-- No Insert mode, full BRE compatibility, macros, next-with-new-list,
+- No full BRE compatibility, macros, next-with-new-list,
   substitution confirmation, multi-line replacement, or recovery yet.
 
 Legacy: vir <unused-opt> <filename> prints a file without editing it.
@@ -63,7 +63,13 @@ This old two-argument entry point is retained; use --ex for editing.
 
 Visual frontend (--vi): requires terminal stdin and stdout. Use hjkl or
 arrow keys, 0/$ (Home/End), g/G (first/last line), PageUp/PageDown or
-Ctrl-B/Ctrl-F. q or Ctrl-C checks for unsaved changes before exiting.
+Ctrl-B/Ctrl-F. In normal mode, q or Ctrl-C checks for unsaved changes
+before exiting. i inserts before the cursor, a after it, o opens a line
+below. [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
+Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
+commits the whole input session and returns to normal mode. Arrow keys
+are ignored during Insert. Normal x deletes a character; u (or :u)
+undoes/restores the last edit, including a whole Insert session.
 Type : to enter w [path], q, q!, wq [path], e[!] [path], f [path],
 d, u, or s/pattern/replacement/[g]; addresses and ranges follow ex semantics.
 Successful edits/loads move to the resulting ex line at column 1.
@@ -79,4 +85,7 @@ as caret notation; zero-width characters show a replacement glyph.
 Movement uses Unicode scalars, not grapheme clusters; complex emoji and
 combining sequences are not fully supported. The last terminal column is
 reserved to avoid autowrap. Browsing and searching never change text;
-:d/:s/:u can edit it and :w/:wq write files. Insert mode and multiline :a/:i/:c are not implemented yet.
+:w/:wq write files. Multiline :a/:i/:c, counts, dot-repeat, autoindent
+and bracketed paste are not implemented. Terminal I/O errors retain the
+current Insert draft in memory before returning; no recovery file or
+automatic save is provided.

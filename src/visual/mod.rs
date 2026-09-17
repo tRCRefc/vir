@@ -1,5 +1,6 @@
 //! Visual frontend with search and ex editing commands. Layout is independent of terminal I/O.
 mod command;
+mod insert;
 mod search;
 mod terminal;
 use crate::buffer::TextBuffer;
@@ -135,12 +136,35 @@ impl VisualState {
     }
 
     pub fn frame(&mut self, buffer: &TextBuffer, name: &str, width: u16, height: u16) -> Frame {
+        self.layout(buffer, name, width, height, false)
+    }
+
+    pub fn insert_frame(
+        &mut self,
+        buffer: &TextBuffer,
+        name: &str,
+        width: u16,
+        height: u16,
+    ) -> Frame {
+        self.layout(buffer, name, width, height, true)
+    }
+
+    fn layout(
+        &mut self,
+        buffer: &TextBuffer,
+        name: &str,
+        width: u16,
+        height: u16,
+        inserting: bool,
+    ) -> Frame {
         // Reserve the final column to avoid terminal autowrap at bottom-right.
         let columns = usize::from(width.saturating_sub(1));
         let rows = usize::from(height.saturating_sub(1));
         self.row = self.row.min(buffer.line_count().saturating_sub(1));
         let line = buffer.line(self.row).unwrap_or("");
-        self.column = self.column.min(line.chars().count().saturating_sub(1));
+        self.column = self
+            .column
+            .min(line.chars().count().saturating_sub(usize::from(!inserting)));
         let x = screen_column(line, self.column);
         if self.row < self.top {
             self.top = self.row;
@@ -163,10 +187,16 @@ impl VisualState {
             .collect();
         let status = clip(
             &format!(
-                "[VIEW] {name}  {}/{}  col {}  :command q:quit",
+                "[{}] {name}  {}/{}  col {}  {}",
+                if inserting { "INSERT" } else { "VIEW" },
                 if buffer.is_empty() { 0 } else { self.row + 1 },
                 buffer.line_count(),
-                self.column + 1
+                self.column + 1,
+                if inserting {
+                    "Esc:normal"
+                } else {
+                    ":command q:quit"
+                }
             ),
             0,
             columns,

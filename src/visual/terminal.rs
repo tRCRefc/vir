@@ -99,6 +99,96 @@ impl CommandLine {
     }
 }
 
+fn read_event(width: u16, height: u16) -> io::Result<Event> {
+    loop {
+        if event::poll(std::time::Duration::from_millis(100))? {
+            return event::read();
+        }
+        let (w, h) = terminal::size()?;
+        if (w, h) != (width, height) {
+            return Ok(Event::Resize(w, h));
+        }
+    }
+}
+
+fn insert_mode(
+    editor: &mut Editor,
+    state: &mut VisualState,
+    mode: char,
+    width: &mut u16,
+    height: &mut u16,
+) -> io::Result<()> {
+    let name = editor
+        .path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "[No file]".into());
+    let mut edit = state.begin_insert(editor, mode).map_err(io::Error::other)?;
+    let result = (|| -> io::Result<()> {
+        loop {
+            let position = edit.cursor();
+            state.row = position.row;
+            state.column = position.column;
+            let frame = state.insert_frame(edit.buffer(), &name, *width, *height);
+            let mut output = io::stdout().lock();
+            queue!(
+                output,
+                cursor::Hide,
+                cursor::MoveTo(0, 0),
+                Clear(ClearType::All)
+            )?;
+            for (row, line) in frame.lines.iter().enumerate() {
+                queue!(output, cursor::MoveTo(0, row as u16), Print(line))?;
+            }
+            if *height > 0 {
+                queue!(output, cursor::MoveTo(0, *height - 1), Print(frame.status))?;
+            }
+            if let Some((x, y)) = frame.cursor {
+                queue!(output, cursor::MoveTo(x, y), cursor::Show)?;
+            }
+            output.flush()?;
+            drop(output);
+            match read_event(*width, *height)? {
+                Event::Resize(w, h) => {
+                    *width = w;
+                    *height = h;
+                }
+                Event::Key(key)
+                    if key.kind != KeyEventKind::Release
+                        && insert_key(&mut edit, key).map_err(io::Error::other)? =>
+                {
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    })();
+    // Retain typed text in the editor even when terminal I/O fails.
+    let position = edit.commit().map_err(io::Error::other)?;
+    state.finish_insert(position);
+    result
+}
+
+fn insert_key(edit: &mut crate::editor::TextEdit<'_>, key: KeyEvent) -> Result<bool, String> {
+    match key.code {
+        KeyCode::Esc => return Ok(true),
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
+        KeyCode::Backspace => edit.backspace()?,
+        KeyCode::Delete => edit.delete()?,
+        KeyCode::Enter => edit.insert("\n")?,
+        KeyCode::Tab => edit.insert("\t")?,
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !c.is_control() =>
+        {
+            edit.insert(&c.to_string())?
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
 pub fn run(editor: &mut Editor) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
@@ -162,15 +252,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
         drop(output);
         // Some terminal environments do not deliver resize events reliably.
         // Check dimensions while idle as well, including during command input.
-        let event = loop {
-            if event::poll(std::time::Duration::from_millis(100))? {
-                break event::read()?;
-            }
-            let (w, h) = terminal::size()?;
-            if (w, h) != (width, height) {
-                break Event::Resize(w, h);
-            }
-        };
+        let event = read_event(width, height)?;
         match event {
             Event::Resize(w, h) => {
                 width = w;
@@ -195,6 +277,26 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                {
+                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o')) = key.code {
+                        insert_mode(editor, &mut state, mode, &mut width, &mut height)?;
+                        continue;
+                    }
+                    if key.code == KeyCode::Char('u') {
+                        command.execute("u", editor, &mut state);
+                        continue;
+                    }
+                    if key.code == KeyCode::Char('x') {
+                        if let Err(error) = state.delete_character(editor) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
+                }
+
                 if key.code == KeyCode::Char(':') {
                     command.input = Some(String::new());
                     command.search_direction = None;
@@ -252,6 +354,46 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn insert_keys_treat_commands_as_text_and_commit_on_escape_or_control_c() {
+        for exit in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            let mut editor = Editor::default();
+            let mut edit = editor
+                .begin_text_edit(crate::buffer::Position::default())
+                .unwrap();
+            for c in "q:中".chars() {
+                assert!(
+                    !insert_key(
+                        &mut edit,
+                        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+                    )
+                    .unwrap()
+                );
+            }
+            insert_key(&mut edit, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+            insert_key(&mut edit, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+            insert_key(
+                &mut edit,
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            )
+            .unwrap();
+            insert_key(&mut edit, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)).unwrap();
+            insert_key(
+                &mut edit,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            )
+            .unwrap();
+            assert!(insert_key(&mut edit, exit).unwrap());
+            edit.commit().unwrap();
+            assert_eq!(editor.buffer().to_text(), "q:中\t\n");
+            editor.undo().unwrap();
+            assert!(editor.buffer().is_empty());
+        }
+    }
 
     #[test]
     fn command_input_cancel_unicode_and_narrow_display() {
