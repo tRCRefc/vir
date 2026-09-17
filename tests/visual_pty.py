@@ -78,7 +78,7 @@ def command_session(path, quit_command):
         receive(master, b"/ignored")
         os.write(master, b"\x03")
         receive(master, b"[VIEW]")
-        os.write(master, b":d\r")
+        os.write(master, b":a\r")
         receive(master, b"? visual supports only")
         os.write(master, f":w {path.parent}\r".encode())
         receive(master, b"? ")
@@ -114,7 +114,53 @@ def command_session(path, quit_command):
         export.unlink(missing_ok=True)
 
 
+def editing_session(directory):
+    path = directory / "editing"
+    path.write_text("FIRST\nMIDDLE\nLAST\n")
+    export = directory / "renamed"
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 120, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/3  col 1")
+        os.write(master, b"G:2,$d\r")
+        receive(master, b"1/1  col 1")
+        os.write(master, b":q\r")
+        receive(master, b"? unsaved changes")
+        assert process.poll() is None
+        os.write(master, b":u\r")
+        receive(master, b"3/3  col 1")
+        os.write(master, b":s/LAST/changed/\r")
+        data = receive(master, b"3/3  col 1")
+        assert b"changed" in data and b"[+]" in data
+        os.write(master, f":e {path}\r".encode())
+        receive(master, b"? unsaved changes")
+        os.write(master, f":e! {path}\r".encode())
+        data = receive(master, b"3/3  col 1")
+        assert b"LAST" in data and b"[VIEW] [+]" not in data
+        os.write(master, f":f {export}\r".encode())
+        receive(master, b"line 3 of 3")
+        os.write(master, b":%d\r")
+        receive(master, b"0/0  col 1")
+        os.write(master, b":u\r")
+        receive(master, b"3/3  col 1")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert export.read_bytes() == path.read_bytes()
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    editing_session(Path(directory))
     path = Path(directory) / "text"
     content = "FIRST-LINE\n" + "中\ttext\n" * 20 + "LAST-LINE\n"
     path.write_text(content)
@@ -124,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
     for quit_command in [b":q\r", b":q!\r", b":wq\r"]:
         command_session(path, quit_command)
         assert path.read_text() == content
-print("PTY: browse, command input/save/error recovery, resize, exits and terminal restoration passed")
+print("PTY: browse, editing/undo/load/save/error recovery, resize, exits and terminal restoration passed")
 
 # Exercise RAII cleanup on injected errors and unwinding panics in a real PTY.
 master, slave = pty.openpty()

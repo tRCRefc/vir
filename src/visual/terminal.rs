@@ -34,27 +34,15 @@ struct CommandLine {
 }
 
 impl CommandLine {
-    fn execute(&mut self, text: &str, editor: &mut Editor) -> bool {
-        use crate::ex::{
-            command::execute,
-            parser::{Command, parse},
-        };
-        let result = parse(text).map_err(|e| e.to_string()).and_then(|parsed| {
-            if !matches!(
-                parsed.command,
-                Command::Write | Command::WriteQuit | Command::Quit { .. }
-            ) {
-                return Err("visual supports only :w, :q, :q! and :wq".into());
-            }
-            execute(parsed, editor)
-        });
+    fn execute(&mut self, text: &str, editor: &mut Editor, state: &mut VisualState) -> bool {
+        let result = state.execute_ex(text, editor);
         match result {
             Ok(result) => {
-                self.message = Some(if result.quit {
-                    String::new()
+                self.message = if result.output.is_empty() {
+                    None
                 } else {
-                    "Written".into()
-                });
+                    Some(result.output.trim_end_matches('\n').to_owned())
+                };
                 result.quit
             }
             Err(error) => {
@@ -126,6 +114,11 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
             .path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "[No file]".into());
+        let name = if editor.is_modified() {
+            format!("[+] {name}")
+        } else {
+            name
+        };
         let frame = state.frame(editor.buffer(), &name, width, height);
         if !editor.buffer().is_empty() {
             editor
@@ -191,7 +184,9 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                             if let Err(error) = state.search(editor, &text, forward) {
                                 command.message = Some(format!("? {error}"));
                             }
-                        } else if !text.trim().is_empty() && command.execute(&text, editor) {
+                        } else if !text.trim().is_empty()
+                            && command.execute(&text, editor, &mut state)
+                        {
                             return Ok(());
                         }
                         continue;
@@ -221,7 +216,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     || (key.modifiers.contains(KeyModifiers::CONTROL)
                         && key.code == KeyCode::Char('c'))
                 {
-                    if command.execute("q", editor) {
+                    if command.execute("q", editor, &mut state) {
                         return Ok(());
                     }
                     continue;
@@ -297,20 +292,21 @@ mod tests {
         let mut editor = Editor::default();
         editor.insert_lines(0, ["changed"]).unwrap();
         let before = editor.clone();
+        let mut state = VisualState::default();
         let mut command = CommandLine::default();
-        for text in ["q", "w", "wq", "d", "a", "s/a/b/", "w!", "1q"] {
-            assert!(!command.execute(text, &mut editor), "{text}");
+        for text in ["q", "w", "wq", "a", "i", "c", "p", "w!", "1q"] {
+            assert!(!command.execute(text, &mut editor, &mut state), "{text}");
             assert!(command.message.as_ref().unwrap().starts_with("? "));
             assert_eq!(editor, before);
         }
-        assert!(command.execute("q!", &mut editor));
+        assert!(command.execute("q!", &mut editor, &mut state));
         assert_eq!(editor, before);
-        assert!(!command.execute(&format!("w {}", path.display()), &mut editor));
+        assert!(!command.execute(&format!("w {}", path.display()), &mut editor, &mut state));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "changed\n");
         assert!(!editor.is_modified());
-        assert!(command.execute("q", &mut editor));
+        assert!(command.execute("q", &mut editor, &mut state));
         editor.insert_lines(1, ["again"]).unwrap();
-        assert!(command.execute("wq", &mut editor));
+        assert!(command.execute("wq", &mut editor, &mut state));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "changed\nagain\n");
     }
 
