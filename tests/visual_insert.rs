@@ -98,3 +98,28 @@ fn uppercase_insert_and_counted_dd_follow_normal_mode_rules() {
     editor.undo().unwrap();
     assert_eq!(editor.buffer().line(1), Some("above"));
 }
+
+#[test]
+fn indented_i_and_large_delete_counts_handle_boundaries() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text(" \t中\nlast\n").unwrap());
+    let mut state = VisualState::default();
+    let mut edit = state.begin_insert(&mut editor, 'I').unwrap();
+    edit.insert("!").unwrap();
+    state.finish_insert(edit.commit().unwrap());
+    assert_eq!(editor.buffer().line(0), Some(" \t!中"));
+    state.row = 1;
+    state.delete_lines(&mut editor, usize::MAX).unwrap();
+    assert_eq!(editor.buffer().line_count(), 1);
+    state.delete_lines(&mut editor, usize::MAX).unwrap();
+    assert!(editor.buffer().is_empty());
+    let before = editor.clone();
+    assert!(state.delete_lines(&mut editor, 1).is_err());
+    assert_eq!(editor, before);
+    for mode in ['I', 'A', 'O'] {
+        let mut editor = Editor::default();
+        let mut edit = state.begin_insert(&mut editor, mode).unwrap();
+        edit.insert("text").unwrap();
+        edit.commit().unwrap();
+        assert_eq!(editor.buffer().to_text(), "text\n");
+    }
+}

@@ -209,7 +209,52 @@ def insert_session(directory):
         os.close(slave)
 
 
+def normal_actions_session(directory):
+    path = directory / "normal-actions"
+    path.write_text(" \tfirst\n" + "line\n" * 10 + "last\n")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 120, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/12  col 1")
+        os.write(master, b"I!\x1b")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"A?\x1b")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"Oabove\x1b")
+        receive(master, b"1/13  col 5")
+        os.write(master, b"10dd")
+        receive(master, b"1/3  col 1")
+        os.write(master, b"u")
+        receive(master, b"1/13  col 1")
+        os.write(master, b"2d3d")
+        receive(master, b"1/7  col 1")
+        os.write(master, b"u")
+        receive(master, b"1/13  col 1")
+        os.write(master, b"9d\x1b")
+        receive(master, b"1/13  col 1")
+        os.write(master, b"dq")
+        receive(master, b"command cancelled")
+        assert process.poll() is None
+        os.write(master, b"dd")
+        receive(master, b"1/12  col 1")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == " \t!first?\n" + "line\n" * 10 + "last\n"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    normal_actions_session(Path(directory))
     insert_session(Path(directory))
     editing_session(Path(directory))
     path = Path(directory) / "text"

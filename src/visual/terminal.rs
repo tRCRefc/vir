@@ -99,6 +99,67 @@ impl CommandLine {
     }
 }
 
+#[derive(Default)]
+struct NormalPrefix {
+    digits: usize,
+    operator_count: Option<usize>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PrefixAction {
+    Pass,
+    Pending,
+    Delete(usize),
+}
+
+impl NormalPrefix {
+    fn key(&mut self, key: KeyEvent) -> Result<PrefixAction, &'static str> {
+        let active = self.digits != 0 || self.operator_count.is_some();
+        if key.code == KeyCode::Esc
+            || key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            *self = Self::default();
+            return Ok(if active {
+                PrefixAction::Pending
+            } else {
+                PrefixAction::Pass
+            });
+        }
+        if let KeyCode::Char(c @ '0'..='9') = key.code
+            && (c != '0' || self.digits != 0)
+        {
+            let next = self
+                .digits
+                .checked_mul(10)
+                .and_then(|n| n.checked_add((c as u8 - b'0') as usize));
+            if let Some(next) = next {
+                self.digits = next;
+                return Ok(PrefixAction::Pending);
+            }
+            *self = Self::default();
+            return Err("count too large");
+        }
+        if key.code == KeyCode::Char('d') {
+            if let Some(before) = self.operator_count {
+                let count = before.checked_mul(self.digits.max(1));
+                *self = Self::default();
+                return count.map(PrefixAction::Delete).ok_or("count too large");
+            }
+            self.operator_count = Some(self.digits.max(1));
+            self.digits = 0;
+            return Ok(PrefixAction::Pending);
+        }
+        *self = Self::default();
+        if active {
+            Err("only counted dd is supported; command cancelled")
+        } else {
+            Ok(PrefixAction::Pass)
+        }
+    }
+}
+
 fn read_event(width: u16, height: u16) -> io::Result<Event> {
     loop {
         if event::poll(std::time::Duration::from_millis(100))? {
@@ -198,8 +259,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
     let _guard = TerminalGuard::enter()?;
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
-    let mut pending_count = 0usize;
-    let mut pending_delete = false;
+    let mut prefix = NormalPrefix::default();
     let (mut width, mut height) = terminal::size()?;
     loop {
         let name = editor
@@ -279,28 +339,19 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
-                if let KeyCode::Char(c @ '1'..='9') = key.code {
-                    pending_count = pending_count
-                        .saturating_mul(10)
-                        .saturating_add((c as u8 - b'0') as usize);
-                    continue;
-                }
-                if key.code == KeyCode::Char('d') {
-                    if pending_delete {
-                        let count = pending_count.max(1);
+                match prefix.key(key) {
+                    Ok(PrefixAction::Pending) => continue,
+                    Ok(PrefixAction::Delete(count)) => {
                         if let Err(error) = state.delete_lines(editor, count) {
                             command.message = Some(format!("? {error}"));
                         }
-                        pending_count = 0;
-                        pending_delete = false;
-                    } else {
-                        pending_delete = true;
+                        continue;
                     }
-                    continue;
-                }
-                if pending_delete {
-                    pending_delete = false;
-                    pending_count = 0;
+                    Err(error) => {
+                        command.message = Some(format!("? {error}"));
+                        continue;
+                    }
+                    Ok(PrefixAction::Pass) => {}
                 }
                 if !key
                     .modifiers
@@ -379,6 +430,46 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normal_prefix_counts_cancel_and_reject_overflow_without_leaking() {
+        let mut prefix = NormalPrefix::default();
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        for (sequence, count) in [("dd", 1), ("10dd", 10), ("d20d", 20), ("2d3d", 6)] {
+            for c in sequence[..sequence.len() - 1].chars() {
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
+            }
+            assert_eq!(prefix.key(key('d')), Ok(PrefixAction::Delete(count)));
+        }
+        for sequence in ["3i", "dq", "d0", "9x"] {
+            for c in sequence[..sequence.len() - 1].chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            assert!(prefix.key(key(sequence.chars().last().unwrap())).is_err());
+            assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
+        }
+        for cancel in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            prefix.key(key('4')).unwrap();
+            prefix.key(key('d')).unwrap();
+            assert_eq!(prefix.key(cancel), Ok(PrefixAction::Pending));
+            assert_eq!(prefix.key(key('q')), Ok(PrefixAction::Pass));
+        }
+        for c in usize::MAX.to_string().chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        assert!(prefix.key(key('0')).is_err());
+        assert_eq!(prefix.key(key('i')), Ok(PrefixAction::Pass));
+        for c in usize::MAX.to_string().chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        prefix.key(key('d')).unwrap();
+        prefix.key(key('2')).unwrap();
+        assert!(prefix.key(key('d')).is_err());
+        assert_eq!(prefix.key(key('q')), Ok(PrefixAction::Pass));
+    }
 
     #[test]
     fn insert_keys_treat_commands_as_text_and_commit_on_escape_or_control_c() {

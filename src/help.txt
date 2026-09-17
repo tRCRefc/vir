@@ -65,7 +65,11 @@ Visual frontend (--vi): requires terminal stdin and stdout. Use hjkl or
 arrow keys, 0/$ (Home/End), g/G (first/last line), PageUp/PageDown or
 Ctrl-B/Ctrl-F. In normal mode, q or Ctrl-C checks for unsaved changes
 before exiting. i inserts before the cursor, a after it, o opens a line
-below. [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
+below. A appends at line end, I inserts before the first nonblank (space/
+Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
+2d3d (six lines). Esc/Ctrl-C cancels a pending count/operator. Counts
+for other commands and other d motions are rejected.
+[INSERT] marks text input: Enter splits a line, Tab inserts a tab,
 Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys
 are ignored during Insert. Normal x deletes a character; u (or :u)
@@ -85,7 +89,7 @@ as caret notation; zero-width characters show a replacement glyph.
 Movement uses Unicode scalars, not grapheme clusters; complex emoji and
 combining sequences are not fully supported. The last terminal column is
 reserved to avoid autowrap. Browsing and searching never change text;
-:w/:wq write files. Multiline :a/:i/:c, counts, dot-repeat, autoindent
+:w/:wq write files. Multiline :a/:i/:c, general counts, dot-repeat, autoindent
 and bracketed paste are not implemented. Terminal I/O errors retain the
 current Insert draft in memory before returning; no recovery file or
 automatic save is provided.

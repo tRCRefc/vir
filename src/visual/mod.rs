@@ -30,7 +30,10 @@ impl VisualState {
         if editor.buffer().is_empty() {
             return Err("EmptyBuffer".into());
         }
-        let end = (self.row + count.max(1) - 1).min(editor.buffer().line_count() - 1);
+        let end = self
+            .row
+            .saturating_add(count.max(1) - 1)
+            .min(editor.buffer().line_count() - 1);
         editor.delete_lines(self.row, end)?;
         self.row = editor.current().unwrap_or(0);
         self.column = 0;

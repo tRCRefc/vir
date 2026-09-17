@@ -21,7 +21,13 @@ impl VisualState {
                 self.column.saturating_add(1).min(length)
             }
         } else if mode == 'I' {
-            0
+            editor
+                .buffer()
+                .line(self.row)
+                .unwrap_or("")
+                .chars()
+                .position(|c| c != ' ' && c != '\t')
+                .unwrap_or(length)
         } else {
             self.column
         };
