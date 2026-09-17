@@ -10,12 +10,18 @@ impl VisualState {
         editor: &'a mut Editor,
         mode: char,
     ) -> Result<TextEdit<'a>, String> {
-        if !matches!(mode, 'i' | 'a' | 'o') {
+        if !matches!(mode, 'i' | 'a' | 'o' | 'I' | 'A' | 'O') {
             return Err("unsupported insert mode".into());
         }
         let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
-        let column = if mode == 'a' {
-            self.column.saturating_add(1).min(length)
+        let column = if mode == 'a' || mode == 'A' {
+            if mode == 'A' {
+                length
+            } else {
+                self.column.saturating_add(1).min(length)
+            }
+        } else if mode == 'I' {
+            0
         } else {
             self.column
         };
@@ -25,6 +31,8 @@ impl VisualState {
         })?;
         if mode == 'o' {
             edit.open_line_below()?;
+        } else if mode == 'O' {
+            edit.open_line_above()?;
         }
         Ok(edit)
     }

@@ -74,3 +74,27 @@ fn insert_layout_retains_gap_and_scrolls_through_resize() {
     state.frame(&buffer, "file", 80, 24);
     assert_eq!(state.column, expected - 1);
 }
+
+#[test]
+fn uppercase_insert_and_counted_dd_follow_normal_mode_rules() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\nfour\n").unwrap());
+    let mut state = VisualState::default();
+    editor.set_current(1).unwrap();
+    state.row = 1;
+    let mut edit = state.begin_insert(&mut editor, 'I').unwrap();
+    edit.insert("!").unwrap();
+    state.finish_insert(edit.commit().unwrap());
+    assert_eq!(editor.buffer().line(1), Some("!two"));
+    let mut edit = state.begin_insert(&mut editor, 'A').unwrap();
+    edit.insert("!").unwrap();
+    state.finish_insert(edit.commit().unwrap());
+    assert_eq!(editor.buffer().line(1), Some("!two!"));
+    let mut edit = state.begin_insert(&mut editor, 'O').unwrap();
+    edit.insert("above").unwrap();
+    state.finish_insert(edit.commit().unwrap());
+    assert_eq!(editor.buffer().line(1), Some("above"));
+    state.delete_lines(&mut editor, 2).unwrap();
+    assert_eq!(editor.buffer().to_text(), "one\nthree\nfour\n");
+    editor.undo().unwrap();
+    assert_eq!(editor.buffer().line(1), Some("above"));
+}

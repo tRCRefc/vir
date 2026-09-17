@@ -21,6 +21,26 @@ pub enum Motion {
     PageDown,
 }
 
+impl VisualState {
+    pub fn delete_lines(
+        &mut self,
+        editor: &mut crate::editor::Editor,
+        count: usize,
+    ) -> Result<(), String> {
+        if editor.buffer().is_empty() {
+            return Err("EmptyBuffer".into());
+        }
+        let end = (self.row + count.max(1) - 1).min(editor.buffer().line_count() - 1);
+        editor.delete_lines(self.row, end)?;
+        self.row = editor.current().unwrap_or(0);
+        self.column = 0;
+        self.preferred_column = 0;
+        self.left = 0;
+        self.top = self.top.min(self.row);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct VisualState {
     pub row: usize,

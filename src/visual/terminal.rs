@@ -198,6 +198,8 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
     let _guard = TerminalGuard::enter()?;
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
+    let mut pending_count = 0usize;
+    let mut pending_delete = false;
     let (mut width, mut height) = terminal::size()?;
     loop {
         let name = editor
@@ -277,11 +279,34 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
+                if let KeyCode::Char(c @ '1'..='9') = key.code {
+                    pending_count = pending_count
+                        .saturating_mul(10)
+                        .saturating_add((c as u8 - b'0') as usize);
+                    continue;
+                }
+                if key.code == KeyCode::Char('d') {
+                    if pending_delete {
+                        let count = pending_count.max(1);
+                        if let Err(error) = state.delete_lines(editor, count) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        pending_count = 0;
+                        pending_delete = false;
+                    } else {
+                        pending_delete = true;
+                    }
+                    continue;
+                }
+                if pending_delete {
+                    pending_delete = false;
+                    pending_count = 0;
+                }
                 if !key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
-                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o')) = key.code {
+                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o' | 'I' | 'A' | 'O')) = key.code {
                         insert_mode(editor, &mut state, mode, &mut width, &mut height)?;
                         continue;
                     }
