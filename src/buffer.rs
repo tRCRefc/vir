@@ -1,5 +1,12 @@
 //! Editable text storage shared by ex and vi.
 
+/// Zero-based row and Unicode scalar gap; column may equal the line length.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Position {
+    pub row: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextBuffer {
     lines: Vec<String>,
@@ -7,6 +14,65 @@ pub struct TextBuffer {
 }
 
 impl TextBuffer {
+    pub fn validate_position(&self, position: Position) -> Result<(), &'static str> {
+        if self.is_empty() && position == Position::default() {
+            return Ok(());
+        }
+        match self.line(position.row) {
+            Some(line) if position.column <= line.chars().count() => Ok(()),
+            _ => Err("character position out of bounds"),
+        }
+    }
+
+    /// Replace a half-open scalar range atomically, returning the inserted text's end.
+    pub fn replace_text(
+        &mut self,
+        start: Position,
+        end: Position,
+        text: &str,
+    ) -> Result<Position, &'static str> {
+        self.validate_position(start)?;
+        self.validate_position(end)?;
+        if start > end {
+            return Err("reversed character range");
+        }
+        if text.contains('\r') {
+            return Err("carriage returns are not supported");
+        }
+        if start == end && text.is_empty() {
+            return Ok(start);
+        }
+        let first = self.line(start.row).unwrap_or("");
+        let last = self.line(end.row).unwrap_or("");
+        let byte = |line: &str, column| {
+            line.char_indices()
+                .nth(column)
+                .map_or(line.len(), |(i, _)| i)
+        };
+        let mut replacement = text.split('\n').map(str::to_owned).collect::<Vec<_>>();
+        let cursor = Position {
+            row: start.row + replacement.len() - 1,
+            column: replacement.last().unwrap().chars().count()
+                + if replacement.len() == 1 {
+                    start.column
+                } else {
+                    0
+                },
+        };
+        replacement[0].insert_str(0, &first[..byte(first, start.column)]);
+        replacement
+            .last_mut()
+            .unwrap()
+            .push_str(&last[byte(last, end.column)..]);
+        if self.is_empty() {
+            self.lines = replacement;
+            self.trailing_newline = true;
+        } else {
+            self.lines.splice(start.row..=end.row, replacement);
+        }
+        Ok(cursor)
+    }
+
     /// Build a buffer from UTF-8 text using LF line endings.
     pub fn from_text(text: &str) -> Result<Self, &'static str> {
         if text.contains('\r') {

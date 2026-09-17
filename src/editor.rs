@@ -1,7 +1,9 @@
 //! Shared ex/visual state. Frontends cannot independently mutate its text or dot.
 
 use std::io;
+mod text_edit;
 use std::path::{Path, PathBuf};
+pub use text_edit::TextEdit;
 
 use crate::buffer::TextBuffer;
 use crate::ex::address::{AddressError, LineRange};
