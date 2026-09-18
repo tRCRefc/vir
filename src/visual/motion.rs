@@ -15,6 +15,7 @@ struct Cursor<'a> {
     buffer: &'a TextBuffer,
     position: Position,
     byte: usize,
+    big_word: bool,
 }
 
 impl Cursor<'_> {
@@ -26,7 +27,7 @@ impl Cursor<'_> {
         match self.line()[self.byte..].chars().next() {
             None => Class::Empty,
             Some(c) if c.is_whitespace() => Class::Space,
-            Some(c) if c.is_alphanumeric() || c == '_' => Class::Word,
+            Some(c) if self.big_word || c.is_alphanumeric() || c == '_' => Class::Word,
             Some(_) => Class::Punctuation,
         }
     }
@@ -139,15 +140,19 @@ pub(super) fn word_target(
         .map_or((0, 0), |(column, (byte, _))| (column, byte));
     let mut cursor = Cursor {
         buffer,
+        big_word: matches!(
+            motion,
+            Motion::BigWordForward | Motion::BigWordBackward | Motion::BigWordEnd
+        ),
         position: Position { column, ..position },
         byte,
     };
     for _ in 0..count {
         let before = cursor.position;
         match motion {
-            Motion::WordForward => cursor.forward_word(),
-            Motion::WordBackward => cursor.backward_word(),
-            Motion::WordEnd => cursor.end_word(),
+            Motion::WordForward | Motion::BigWordForward => cursor.forward_word(),
+            Motion::WordBackward | Motion::BigWordBackward => cursor.backward_word(),
+            Motion::WordEnd | Motion::BigWordEnd => cursor.end_word(),
             _ => unreachable!("word_target requires a word motion"),
         }
         if before == cursor.position {

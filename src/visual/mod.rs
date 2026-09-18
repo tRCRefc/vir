@@ -24,6 +24,9 @@ pub enum Motion {
     WordForward,
     WordBackward,
     WordEnd,
+    BigWordForward,
+    BigWordBackward,
+    BigWordEnd,
 }
 
 impl VisualState {
@@ -143,7 +146,12 @@ impl VisualState {
             Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown
         );
         match motion {
-            Motion::WordForward | Motion::WordBackward | Motion::WordEnd => {
+            Motion::WordForward
+            | Motion::WordBackward
+            | Motion::WordEnd
+            | Motion::BigWordForward
+            | Motion::BigWordBackward
+            | Motion::BigWordEnd => {
                 let position = motion::word_target(
                     buffer,
                     crate::buffer::Position {

@@ -98,9 +98,11 @@ counts such as 3w repeat the motion. Words group Unicode letters/numbers
 and underscore separately from punctuation; Unicode whitespace separates
 words. w/b stop on empty lines, e skips them; whitespace-only lines are
 skipped. File boundaries clamp. Combining marks use scalar semantics;
-there is no language-specific word segmentation. W/B/E and d/c/y word
-motions are not supported yet.
-Movement counts support w/b/e, hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
+there is no language-specific word segmentation. W/B/E use the same
+movement rules but group all consecutive non-whitespace characters,
+including punctuation, into a single word. Counts such as 3W are supported.
+d/c/y word motions are not supported yet.
+Movement counts support w/b/e/W/B/E, hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
 and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
 Targets clamp to the buffer; g/G without a count retain first/last behavior.
 Home ignores the count; 0 by itself moves to line start, digits such as

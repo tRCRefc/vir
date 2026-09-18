@@ -502,6 +502,22 @@ def word_session(directory):
         ]:
             os.write(master, keys)
             receive(master, position)
+        for keys, position in [
+            (b"2E", b"1/4  col 12"),
+            (b"B", b"1/4  col 5"),
+            (b"W", b"2/4  col 1"),
+            (b"W", b"3/4  col 3"),
+            (b"2E", b"3/4  col 12"),
+            (b"3B", b"2/4  col 1"),
+            (b"B", b"1/4  col 5"),
+            (b"B", b"1/4  col 1"),
+            (b"999999999999999999W", b"4/4  col 4"),
+            (b"999999999999999999B", b"1/4  col 1"),
+        ]:
+            os.write(master, keys)
+            receive(master, position)
+        os.write(master, b"cW")
+        receive(master, b"unsupported delete motion")
         os.write(master, b"2dw")
         receive(master, b"unsupported delete motion")
         os.write(master, b"w")

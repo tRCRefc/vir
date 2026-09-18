@@ -239,6 +239,9 @@ fn normal_motion(key: KeyEvent) -> Option<Motion> {
         };
     }
     match key.code {
+        KeyCode::Char('W') => Some(Motion::BigWordForward),
+        KeyCode::Char('B') => Some(Motion::BigWordBackward),
+        KeyCode::Char('E') => Some(Motion::BigWordEnd),
         KeyCode::Char('w') => Some(Motion::WordForward),
         KeyCode::Char('b') => Some(Motion::WordBackward),
         KeyCode::Char('e') => Some(Motion::WordEnd),
@@ -671,7 +674,7 @@ mod tests {
     fn word_keys_cancel_counts_and_reject_pending_operators() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let mut prefix = NormalPrefix::default();
-        for c in ['w', 'b', 'e'] {
+        for c in ['w', 'b', 'e', 'W', 'B', 'E'] {
             assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
             for cancel in [
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
@@ -704,6 +707,9 @@ mod tests {
             ("10w", Motion::WordForward, 10),
             ("2b", Motion::WordBackward, 2),
             ("3e", Motion::WordEnd, 3),
+            ("10W", Motion::BigWordForward, 10),
+            ("2B", Motion::BigWordBackward, 2),
+            ("3E", Motion::BigWordEnd, 3),
             ("2$", Motion::End, 2),
             ("5G", Motion::Last, 5),
         ] {
