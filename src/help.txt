@@ -70,14 +70,14 @@ Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
 2d3d (six lines). D deletes from the cursor to the end of the line; C
 does the same and immediately enters Insert, with deletion and typed text
 committed as one undo. Esc/Ctrl-C cancels a pending count/operator. Counts
-for other editing commands are rejected.
+for unsupported editing commands are rejected.
 Delete motions: dh/dl remove characters left/right; d0 deletes up to the
 cursor, d$ through line end. dj/dk delete both current and destination
 lines; dG deletes through EOF, d3G through line 3. Counts multiply:
 2d3l deletes six characters; d2$ deletes through the next line end.
 Arrow keys, Home and End work after d. Horizontal ranges clamp at line
 boundaries; out-of-range vertical/G/$ targets fail without changing text.
-Each delete is one undo. Other d motions are not supported.
+Each delete is one undo. Word operator motions are described below.
 Change motions: ch/cl/cj/ck/c0/c$/cG select the same ranges as d, then
 enter Insert. cc changes the current line; 2cc or c2c changes two lines,
 and 2c3c changes six. Whole-line changes leave one input line. Deletion
@@ -101,7 +101,20 @@ skipped. File boundaries clamp. Combining marks use scalar semantics;
 there is no language-specific word segmentation. W/B/E use the same
 movement rules but group all consecutive non-whitespace characters,
 including punctuation, into a single word. Counts such as 3W are supported.
-d/c/y word motions are not supported yet.
+d/c/y combine with w/b/e/W/B/E; counts before and after the operator
+multiply (2d3w selects six words). Forward word deletes/yanks include
+following whitespace, but their final segment stops at line end. From
+non-whitespace, cw/cW include the current word through its end and leave
+trailing whitespace; counts extend through later word ends. From whitespace,
+change uses the forward range. e/E include the endpoint; b/B exclude the
+original cursor character. Exclusive ranges ending at column 1 leave that
+line intact and become linewise if they start within indentation; otherwise
+they stop at the preceding line end. Multi-line deletes covering all
+nonblank text become linewise; yank/change otherwise remain characterwise.
+Word counts clamp at file boundaries. Empty ranges (including forward/end
+motions on an empty final line) fail without changing text or registers;
+use i/cc/c$ to enter input there. A change plus typed text is one undo;
+yanking preserves text, cursor and undo.
 Movement counts support w/b/e/W/B/E, hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
 and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
 Targets clamp to the buffer; g/G without a count retain first/last behavior.

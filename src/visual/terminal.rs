@@ -1,3 +1,4 @@
+use super::operator::Operator;
 use super::{Motion, VisualState, clip, screen_column};
 use crate::editor::Editor;
 use crossterm::{
@@ -103,19 +104,16 @@ impl CommandLine {
 struct NormalPrefix {
     digits: usize,
     operator_count: Option<usize>,
-    operator: Option<char>,
+    operator: Option<Operator>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum PrefixAction {
     Pass,
     Pending,
-    Delete(usize),
     Join(usize),
     Move(Motion, usize),
-    DeleteMotion(Motion, Option<usize>),
-    Change(Option<Motion>, Option<usize>),
-    Yank(Option<Motion>, Option<usize>),
+    Operate(Operator, Option<Motion>, Option<usize>),
     Put(bool, usize),
 }
 
@@ -158,28 +156,22 @@ impl NormalPrefix {
             *self = Self::default();
             return Err("count too large");
         }
-        if matches!(key.code, KeyCode::Char('d' | 'c' | 'y')) {
+        if let KeyCode::Char(c) = key.code
+            && let Some(requested) = Operator::from_key(c)
+        {
             if let Some(before) = self.operator_count {
                 let operator = self.operator.unwrap();
-                let matches_operator = key.code == KeyCode::Char(operator);
+                let matches_operator = requested == operator;
                 let count = before.max(1).checked_mul(self.digits.max(1));
                 *self = Self::default();
                 if !matches_operator {
                     return Err("mixed operators; command cancelled");
                 }
                 return count
-                    .map(|n| match operator {
-                        'c' => PrefixAction::Change(None, Some(n)),
-                        'y' => PrefixAction::Yank(None, Some(n)),
-                        _ => PrefixAction::Delete(n),
-                    })
+                    .map(|n| PrefixAction::Operate(operator, None, Some(n)))
                     .ok_or("count too large");
             }
-            self.operator = if let KeyCode::Char(c) = key.code {
-                Some(c)
-            } else {
-                None
-            };
+            self.operator = Some(requested);
             self.operator_count = Some(self.digits);
             self.digits = 0;
             return Ok(PrefixAction::Pending);
@@ -190,23 +182,14 @@ impl NormalPrefix {
             let operator = self.operator.unwrap();
             *self = Self::default();
             let count = count.ok_or("count too large")?;
-            if let Some(
-                motion @ (Motion::Left
-                | Motion::Right
-                | Motion::Up
-                | Motion::Down
-                | Motion::Home
-                | Motion::End
-                | Motion::Last),
-            ) = normal_motion(key)
-            {
-                return Ok(match operator {
-                    'c' => PrefixAction::Change(Some(motion), explicit.then_some(count)),
-                    'y' => PrefixAction::Yank(Some(motion), explicit.then_some(count)),
-                    _ => PrefixAction::DeleteMotion(motion, explicit.then_some(count)),
-                });
+            if let Some(motion) = normal_motion(key).filter(|motion| motion.supports_operator()) {
+                return Ok(PrefixAction::Operate(
+                    operator,
+                    Some(motion),
+                    explicit.then_some(count),
+                ));
             }
-            return Err("unsupported delete motion; command cancelled");
+            return Err("unsupported operator motion; command cancelled");
         }
         if matches!(key.code, KeyCode::Char('p' | 'P')) {
             let count = self.digits.max(1);
@@ -499,7 +482,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                 }
                 match prefix.key(key) {
                     Ok(PrefixAction::Pending) => continue,
-                    Ok(PrefixAction::Yank(motion, count)) => {
+                    Ok(PrefixAction::Operate(Operator::Yank, motion, count)) => {
                         if let Err(error) = state.yank(editor, motion, count) {
                             command.message = Some(format!("? {error}"));
                         }
@@ -511,7 +494,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                         }
                         continue;
                     }
-                    Ok(PrefixAction::Change(motion, count)) => {
+                    Ok(PrefixAction::Operate(Operator::Change, motion, count)) => {
                         let name = editor
                             .path()
                             .map(|p| p.display().to_string())
@@ -529,7 +512,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                         }
                         continue;
                     }
-                    Ok(PrefixAction::DeleteMotion(motion, count)) => {
+                    Ok(PrefixAction::Operate(Operator::Delete, Some(motion), count)) => {
                         if let Err(error) = state.delete_motion(editor, motion, count) {
                             command.message = Some(format!("? {error}"));
                         }
@@ -545,8 +528,8 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                         }
                         continue;
                     }
-                    Ok(PrefixAction::Delete(count)) => {
-                        if let Err(error) = state.delete_lines(editor, count) {
+                    Ok(PrefixAction::Operate(Operator::Delete, None, count)) => {
+                        if let Err(error) = state.delete_lines(editor, count.unwrap_or(1)) {
                             command.message = Some(format!("? {error}"));
                         }
                         continue;
@@ -671,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn word_keys_cancel_counts_and_reject_pending_operators() {
+    fn word_keys_compose_with_operators_and_cancel_counts() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let mut prefix = NormalPrefix::default();
         for c in ['w', 'b', 'e', 'W', 'B', 'E'] {
@@ -688,7 +671,30 @@ mod tests {
                 prefix.key(key('2')).unwrap();
                 prefix.key(key(operator)).unwrap();
                 prefix.key(key('3')).unwrap();
+                assert_eq!(
+                    prefix.key(key(c)),
+                    Ok(PrefixAction::Operate(
+                        Operator::from_key(operator).unwrap(),
+                        normal_motion(key(c)),
+                        Some(6)
+                    ))
+                );
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
+            }
+            for operator in ['d', 'c', 'y'] {
+                for digit in usize::MAX.to_string().chars() {
+                    prefix.key(key(digit)).unwrap();
+                }
+                prefix.key(key(operator)).unwrap();
+                prefix.key(key('2')).unwrap();
                 assert!(prefix.key(key(c)).is_err());
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
+                prefix.key(key(operator)).unwrap();
+                prefix.key(key('3')).unwrap();
+                assert_eq!(
+                    prefix.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                    Ok(PrefixAction::Pending)
+                );
                 assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
             }
             assert_eq!(
@@ -744,7 +750,7 @@ mod tests {
             }
             assert_eq!(
                 prefix.key(key(sequence.chars().last().unwrap())),
-                Ok(PrefixAction::DeleteMotion(motion, count))
+                Ok(PrefixAction::Operate(Operator::Delete, Some(motion), count))
             );
             assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
         }
@@ -761,7 +767,7 @@ mod tests {
             }
             assert_eq!(
                 prefix.key(key(sequence.chars().last().unwrap())),
-                Ok(PrefixAction::Change(motion, count))
+                Ok(PrefixAction::Operate(Operator::Change, motion, count))
             );
         }
         for end in [
@@ -785,7 +791,7 @@ mod tests {
             }
             assert_eq!(
                 prefix.key(key(sequence.chars().last().unwrap())),
-                Ok(PrefixAction::Yank(motion, count))
+                Ok(PrefixAction::Operate(Operator::Yank, motion, count))
             );
         }
         prefix.key(key('2')).unwrap();
@@ -801,7 +807,10 @@ mod tests {
             for c in sequence[..sequence.len() - 1].chars() {
                 assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
             }
-            assert_eq!(prefix.key(key('d')), Ok(PrefixAction::Delete(count)));
+            assert_eq!(
+                prefix.key(key('d')),
+                Ok(PrefixAction::Operate(Operator::Delete, None, Some(count)))
+            );
         }
         for (sequence, count) in [("J", 2), ("1J", 2), ("3J", 3)] {
             for c in sequence[..sequence.len() - 1].chars() {

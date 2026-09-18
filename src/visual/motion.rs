@@ -1,5 +1,5 @@
 //! Scalar-based word traversal, independent of terminal input and editing.
-use super::Motion;
+use super::{Motion, operator::Operator};
 use crate::buffer::{Position, TextBuffer};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -123,41 +123,155 @@ impl Cursor<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum WordDirection {
+    Forward,
+    Backward,
+    End,
+}
+
+#[derive(Clone, Copy)]
+struct WordMotion {
+    direction: WordDirection,
+    big_word: bool,
+}
+
+impl WordMotion {
+    fn from_motion(motion: Motion) -> Option<Self> {
+        let (direction, big_word) = match motion {
+            Motion::WordForward => (WordDirection::Forward, false),
+            Motion::WordBackward => (WordDirection::Backward, false),
+            Motion::WordEnd => (WordDirection::End, false),
+            Motion::BigWordForward => (WordDirection::Forward, true),
+            Motion::BigWordBackward => (WordDirection::Backward, true),
+            Motion::BigWordEnd => (WordDirection::End, true),
+            _ => return None,
+        };
+        Some(Self {
+            direction,
+            big_word,
+        })
+    }
+
+    fn advance(self, cursor: &mut Cursor<'_>) {
+        match self.direction {
+            WordDirection::Forward => cursor.forward_word(),
+            WordDirection::Backward => cursor.backward_word(),
+            WordDirection::End => cursor.end_word(),
+        }
+    }
+}
+
+impl<'a> Cursor<'a> {
+    fn new(buffer: &'a TextBuffer, position: Position, big_word: bool) -> Option<Self> {
+        let line = buffer.line(position.row)?;
+        let (column, byte) = line
+            .char_indices()
+            .enumerate()
+            .take(position.column.saturating_add(1))
+            .last()
+            .map_or((0, 0), |(column, (byte, _))| (column, byte));
+        Some(Self {
+            buffer,
+            big_word,
+            position: Position { column, ..position },
+            byte,
+        })
+    }
+
+    // The final forward segment of an operator stops at this line's end,
+    // unlike ordinary navigation. Earlier counted segments can cross lines.
+    fn forward_operator_end(&mut self) -> Endpoint {
+        if self.class() == Class::Empty {
+            self.forward_word();
+            return Endpoint::Exclusive(self.position);
+        }
+        let class = self.class();
+        loop {
+            let next = self.byte + self.line()[self.byte..].chars().next().unwrap().len_utf8();
+            self.position.column += 1;
+            self.byte = next;
+            if next == self.line().len() {
+                return Endpoint::Exclusive(self.position);
+            }
+            if self.class() != class {
+                break;
+            }
+        }
+        while self.class() == Class::Space {
+            self.byte += self.line()[self.byte..].chars().next().unwrap().len_utf8();
+            self.position.column += 1;
+        }
+        Endpoint::Exclusive(self.position)
+    }
+}
+
+/// The endpoint retains inclusion semantics until the operator normalizes it.
+pub(super) enum Endpoint {
+    Exclusive(Position),
+    Inclusive(Position),
+}
+
 pub(super) fn word_target(
     buffer: &TextBuffer,
     position: Position,
     motion: Motion,
     count: usize,
 ) -> Position {
-    let Some(line) = buffer.line(position.row) else {
+    let word = WordMotion::from_motion(motion).expect("word_target requires a word motion");
+    let Some(mut cursor) = Cursor::new(buffer, position, word.big_word) else {
         return position;
-    };
-    let (column, byte) = line
-        .char_indices()
-        .enumerate()
-        .take(position.column.saturating_add(1))
-        .last()
-        .map_or((0, 0), |(column, (byte, _))| (column, byte));
-    let mut cursor = Cursor {
-        buffer,
-        big_word: matches!(
-            motion,
-            Motion::BigWordForward | Motion::BigWordBackward | Motion::BigWordEnd
-        ),
-        position: Position { column, ..position },
-        byte,
     };
     for _ in 0..count {
         let before = cursor.position;
-        match motion {
-            Motion::WordForward | Motion::BigWordForward => cursor.forward_word(),
-            Motion::WordBackward | Motion::BigWordBackward => cursor.backward_word(),
-            Motion::WordEnd | Motion::BigWordEnd => cursor.end_word(),
-            _ => unreachable!("word_target requires a word motion"),
-        }
+        word.advance(&mut cursor);
         if before == cursor.position {
             break;
         }
     }
     cursor.position
+}
+
+pub(super) fn word_endpoint(
+    buffer: &TextBuffer,
+    position: Position,
+    motion: Motion,
+    count: usize,
+    operator: Operator,
+) -> Option<Endpoint> {
+    let word = WordMotion::from_motion(motion)?;
+    let mut cursor = Cursor::new(buffer, position, word.big_word)?;
+    // Change-forward from text consumes the current word, including a lone
+    // final character, then word ends. From whitespace it retains forward
+    // motion semantics. This is one semantic policy, independent of key names.
+    let change_word = operator == Operator::Change
+        && matches!(word.direction, WordDirection::Forward)
+        && matches!(cursor.class(), Class::Word | Class::Punctuation);
+    for index in 0..count {
+        let before = cursor.position;
+        if change_word {
+            if index == 0 {
+                cursor.finish_run(true);
+            } else {
+                cursor.end_word();
+            }
+        } else if matches!(word.direction, WordDirection::Forward) && index == count - 1 {
+            return Some(cursor.forward_operator_end());
+        } else {
+            word.advance(&mut cursor);
+        }
+        if before == cursor.position && !(change_word && index == 0) {
+            break;
+        }
+    }
+    Some(
+        if change_word
+            || matches!(word.direction, WordDirection::End)
+            || (matches!(word.direction, WordDirection::Forward) && cursor.class() != Class::Empty)
+        {
+            Endpoint::Inclusive(cursor.position)
+        } else {
+            Endpoint::Exclusive(cursor.position)
+        },
+    )
 }

@@ -375,7 +375,7 @@ def operator_session(directory):
         os.write(master, b"dj")
         receive(master, b"1/2  col 1")
         os.write(master, b"dk")
-        receive(master, b"delete motion out of bounds")
+        receive(master, b"operator motion out of bounds")
         os.write(master, b"dG")
         receive(master, b"0/0  col 1")
         os.write(master, b"u")
@@ -516,10 +516,10 @@ def word_session(directory):
         ]:
             os.write(master, keys)
             receive(master, position)
-        os.write(master, b"cW")
-        receive(master, b"unsupported delete motion")
-        os.write(master, b"2dw")
-        receive(master, b"unsupported delete motion")
+        os.write(master, b"cg")
+        receive(master, b"unsupported operator motion")
+        os.write(master, b"2dg")
+        receive(master, b"unsupported operator motion")
         os.write(master, b"w")
         receive(master, b"1/4  col 5")
         os.write(master, b"rX")
@@ -540,7 +540,65 @@ def word_session(directory):
         os.close(slave)
 
 
+def word_operator_session(directory):
+    path = directory / "word-operators"
+    path.write_text("one two three four five six seven\nalpha.beta 中文\nlast")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 7, 120, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/3  col 1")
+        os.write(master, b"2d3w")
+        receive(master, b"\x1b[1;1Hseven")
+        os.write(master, b"u")
+        receive(master, b"one two three four five six seven")
+        os.write(master, b"cwX")
+        receive(master, b"X two three")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b"u")
+        receive(master, b"one two three")
+        os.write(master, b"u")
+        receive(master, b"X two three")
+        os.write(master, b"g0wy2wP")
+        receive(master, b"X two three two three four")
+        os.write(master, b"u")
+        receive(master, b"X two three four five six seven")
+        os.write(master, b"g02c3wY")
+        receive(master, b"Y seven")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b"j0yEP")
+        receive(master, "alpha.betaalpha.beta 中文".encode())
+        os.write(master, b"u")
+        receive(master, "alpha.beta 中文".encode())
+        os.write(master, b"0dW")
+        receive(master, "\x1b[2;1H中文".encode())
+        os.write(master, "cE字".encode())
+        receive(master, "\x1b[2;1H字".encode())
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b"g0db")
+        receive(master, b"empty operator motion")
+        os.write(master, b"3c\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "Y seven\n字\nlast"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    word_operator_session(Path(directory))
     word_session(Path(directory))
     register_session(Path(directory))
     change_session(Path(directory))

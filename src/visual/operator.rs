@@ -1,9 +1,36 @@
 //! Shared character/line ranges for visual operators.
-use super::{Motion, VisualState};
+use super::{
+    Motion, VisualState,
+    motion::{Endpoint, word_endpoint},
+};
 use crate::{
-    buffer::Position,
+    buffer::{Position, TextBuffer},
     editor::{Editor, Register, TextEdit},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Operator {
+    Delete,
+    Change,
+    Yank,
+}
+
+impl Operator {
+    pub(super) fn from_key(key: char) -> Option<Self> {
+        match key {
+            'd' => Some(Self::Delete),
+            'c' => Some(Self::Change),
+            'y' => Some(Self::Yank),
+            _ => None,
+        }
+    }
+}
+
+impl Motion {
+    pub(super) fn supports_operator(self) -> bool {
+        !matches!(self, Self::First | Self::PageUp | Self::PageDown)
+    }
+}
 
 enum EditRange {
     Lines(usize, usize),
@@ -11,6 +38,58 @@ enum EditRange {
 }
 
 impl EditRange {
+    fn from_word_endpoint(
+        buffer: &TextBuffer,
+        origin: Position,
+        endpoint: Endpoint,
+        operator: Operator,
+    ) -> Result<Self, String> {
+        let (target, inclusive) = match endpoint {
+            Endpoint::Exclusive(target) => (target, false),
+            Endpoint::Inclusive(target) => (target, true),
+        };
+        let start = origin.min(target);
+        let mut end = origin.max(target);
+        let starts_in_indent = buffer
+            .line(start.row)
+            .unwrap()
+            .chars()
+            .take(start.column)
+            .all(char::is_whitespace);
+        // Exclusive motions ending at column zero do not consume that line.
+        if !inclusive && start.row < end.row && end.column == 0 {
+            if starts_in_indent {
+                return Ok(Self::Lines(start.row, end.row - 1));
+            }
+            end.row -= 1;
+            end.column = buffer.line(end.row).unwrap().chars().count();
+        } else if inclusive {
+            end.column = end
+                .column
+                .saturating_add(1)
+                .min(buffer.line(end.row).unwrap().chars().count());
+        }
+        // A multi-line delete covering all nonblank text removes whole lines.
+        // Yank/change keep their character range, unless the exclusive rule
+        // above already made the motion linewise.
+        if operator == Operator::Delete
+            && start.row < end.row
+            && starts_in_indent
+            && buffer
+                .line(end.row)
+                .unwrap()
+                .chars()
+                .skip(end.column)
+                .all(char::is_whitespace)
+        {
+            return Ok(Self::Lines(start.row, end.row));
+        }
+        if start == end {
+            return Err("empty operator motion".into());
+        }
+        Ok(Self::Characters(start, end))
+    }
+
     fn capture(&self, editor: &Editor) -> Result<Register, String> {
         match *self {
             Self::Lines(start, end) => Register::lines(editor.buffer(), start, end),
@@ -25,6 +104,7 @@ impl VisualState {
         editor: &Editor,
         motion: Motion,
         count: Option<usize>,
+        operator: Operator,
     ) -> Result<EditRange, String> {
         let buffer = editor.buffer();
         let position = Position {
@@ -36,6 +116,9 @@ impl VisualState {
             return Err("EmptyBuffer".into());
         }
         let steps = count.unwrap_or(1).max(1);
+        if let Some(endpoint) = word_endpoint(buffer, position, motion, steps, operator) {
+            return EditRange::from_word_endpoint(buffer, position, endpoint, operator);
+        }
         let last = buffer.line_count() - 1;
         let length = buffer.line(self.row).unwrap().chars().count();
         if matches!(motion, Motion::Up | Motion::Down | Motion::Last) {
@@ -44,7 +127,7 @@ impl VisualState {
                 Motion::Down => self.row.checked_add(steps).filter(|row| *row <= last),
                 _ => Some(count.map_or(last, |_| steps - 1)).filter(|row| *row <= last),
             }
-            .ok_or("delete motion out of bounds")?;
+            .ok_or("operator motion out of bounds")?;
             Ok(EditRange::Lines(self.row.min(target), self.row.max(target)))
         } else {
             let (start, end) = match motion {
@@ -74,7 +157,7 @@ impl VisualState {
                         .row
                         .checked_add(steps - 1)
                         .filter(|row| *row <= last)
-                        .ok_or("delete motion out of bounds")?;
+                        .ok_or("operator motion out of bounds")?;
                     (
                         position,
                         Position {
@@ -83,10 +166,10 @@ impl VisualState {
                         },
                     )
                 }
-                _ => return Err("unsupported delete motion".into()),
+                _ => return Err("unsupported operator motion".into()),
             };
             if start == end {
-                return Err("empty delete motion".into());
+                return Err("empty operator motion".into());
             }
             Ok(EditRange::Characters(start, end))
         }
@@ -98,7 +181,7 @@ impl VisualState {
         motion: Motion,
         count: Option<usize>,
     ) -> Result<(), String> {
-        let range = self.motion_range(editor, motion, count)?;
+        let range = self.motion_range(editor, motion, count, Operator::Delete)?;
         let register = range.capture(editor)?;
         match range {
             EditRange::Lines(start, end) => {
@@ -209,7 +292,7 @@ impl VisualState {
         count: Option<usize>,
     ) -> Result<(), String> {
         let range = if let Some(motion) = motion {
-            self.motion_range(editor, motion, count)?
+            self.motion_range(editor, motion, count, Operator::Yank)?
         } else {
             if editor.buffer().is_empty() {
                 return Err("EmptyBuffer".into());
@@ -225,7 +308,7 @@ impl VisualState {
         Ok(())
     }
 
-    /// None selects cc; a motion selects the same range rules as d.
+    /// None selects cc; motions share range resolution with operator-specific policies.
     pub fn begin_change<'a>(
         &self,
         editor: &'a mut Editor,
@@ -236,7 +319,7 @@ impl VisualState {
             return self.begin_insert(editor, 'C');
         }
         let range = if let Some(motion) = motion {
-            self.motion_range(editor, motion, count)?
+            self.motion_range(editor, motion, count, Operator::Change)?
         } else {
             editor
                 .buffer()
