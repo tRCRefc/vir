@@ -239,6 +239,9 @@ fn normal_motion(key: KeyEvent) -> Option<Motion> {
         };
     }
     match key.code {
+        KeyCode::Char('w') => Some(Motion::WordForward),
+        KeyCode::Char('b') => Some(Motion::WordBackward),
+        KeyCode::Char('e') => Some(Motion::WordEnd),
         KeyCode::Char('h') | KeyCode::Left => Some(Motion::Left),
         KeyCode::Char('j') | KeyCode::Down => Some(Motion::Down),
         KeyCode::Char('k') | KeyCode::Up => Some(Motion::Up),
@@ -665,11 +668,42 @@ mod tests {
     }
 
     #[test]
+    fn word_keys_cancel_counts_and_reject_pending_operators() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        for c in ['w', 'b', 'e'] {
+            assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
+            for cancel in [
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            ] {
+                prefix.key(key('9')).unwrap();
+                assert_eq!(prefix.key(cancel), Ok(PrefixAction::Pending));
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
+            }
+            for operator in ['d', 'c', 'y'] {
+                prefix.key(key('2')).unwrap();
+                prefix.key(key(operator)).unwrap();
+                prefix.key(key('3')).unwrap();
+                assert!(prefix.key(key(c)).is_err());
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pass));
+            }
+            assert_eq!(
+                normal_motion(KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)),
+                None
+            );
+        }
+    }
+
+    #[test]
     fn normal_prefix_counts_cancel_and_reject_overflow_without_leaking() {
         let mut prefix = NormalPrefix::default();
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         for (sequence, motion, count) in [
             ("10j", Motion::Down, 10),
+            ("10w", Motion::WordForward, 10),
+            ("2b", Motion::WordBackward, 2),
+            ("3e", Motion::WordEnd, 3),
             ("2$", Motion::End, 2),
             ("5G", Motion::Last, 5),
         ] {

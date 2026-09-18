@@ -1,6 +1,7 @@
 //! Visual frontend with search and ex editing commands. Layout is independent of terminal I/O.
 mod command;
 mod insert;
+mod motion;
 mod operator;
 mod search;
 mod terminal;
@@ -20,6 +21,9 @@ pub enum Motion {
     Last,
     PageUp,
     PageDown,
+    WordForward,
+    WordBackward,
+    WordEnd,
 }
 
 impl VisualState {
@@ -139,6 +143,19 @@ impl VisualState {
             Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown
         );
         match motion {
+            Motion::WordForward | Motion::WordBackward | Motion::WordEnd => {
+                let position = motion::word_target(
+                    buffer,
+                    crate::buffer::Position {
+                        row: self.row,
+                        column: self.column,
+                    },
+                    motion,
+                    steps,
+                );
+                self.row = position.row;
+                self.column = position.column;
+            }
             Motion::Left => self.column = self.column.saturating_sub(steps),
             Motion::Right => self.column = self.column.saturating_add(steps),
             Motion::Up => self.row = self.row.saturating_sub(steps),

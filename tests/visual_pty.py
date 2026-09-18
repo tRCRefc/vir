@@ -477,7 +477,55 @@ def line_actions_session(directory):
         os.close(slave)
 
 
+def word_session(directory):
+    path = directory / "words"
+    content = "one two...中文\n\n  three four\nlast"
+    path.write_text(content)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 5, 120, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/4  col 1")
+        for keys, position in [
+            (b"w", b"1/4  col 5"),
+            (b"2w", b"1/4  col 11"),
+            (b"e", b"1/4  col 12"),
+            (b"w", b"2/4  col 1"),
+            (b"w", b"3/4  col 3"),
+            (b"2e", b"3/4  col 12"),
+            (b"2b", b"3/4  col 3"),
+            (b"b", b"2/4  col 1"),
+            (b"e", b"3/4  col 7"),
+            (b"999999999999999999w", b"4/4  col 4"),
+            (b"999999999999999999b", b"1/4  col 1"),
+        ]:
+            os.write(master, keys)
+            receive(master, position)
+        os.write(master, b"2dw")
+        receive(master, b"unsupported delete motion")
+        os.write(master, b"w")
+        receive(master, b"1/4  col 5")
+        os.write(master, b"rX")
+        receive(master, b"one Xwo")
+        os.write(master, b"2wu")
+        receive(master, "one two...中文".encode())
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == content
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    word_session(Path(directory))
     register_session(Path(directory))
     change_session(Path(directory))
     operator_session(Path(directory))
