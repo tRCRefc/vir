@@ -6,6 +6,7 @@ pub struct TextEdit<'a> {
     editor: &'a mut Editor,
     draft: TextBuffer,
     cursor: Position,
+    pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
 }
 
@@ -19,6 +20,7 @@ impl Editor {
             editor: self,
             cursor,
             replacements: Vec::new(),
+            pending_register: None,
         })
     }
 }
@@ -68,6 +70,10 @@ impl TextEdit<'_> {
             self.replacements.pop();
         }
         Ok(())
+    }
+
+    pub(crate) fn stage_register(&mut self, register: super::Register) {
+        self.pending_register = Some(register);
     }
 
     pub fn buffer(&self) -> &TextBuffer {
@@ -237,12 +243,16 @@ impl TextEdit<'_> {
     }
 
     pub fn commit(self) -> Result<Position, String> {
+        let pending_register = self.pending_register;
         if self.draft != self.editor.buffer {
             let row = self.cursor.row;
             self.editor.edit(move |buffer| {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
+        }
+        if let Some(register) = pending_register {
+            self.editor.unnamed = Some(register);
         }
         Ok(self.cursor)
     }

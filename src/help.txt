@@ -77,13 +77,22 @@ lines; dG deletes through EOF, d3G through line 3. Counts multiply:
 2d3l deletes six characters; d2$ deletes through the next line end.
 Arrow keys, Home and End work after d. Horizontal ranges clamp at line
 boundaries; out-of-range vertical/G/$ targets fail without changing text.
-Each delete is one undo. Other d motions and registers are not supported.
+Each delete is one undo. Other d motions are not supported.
 Change motions: ch/cl/cj/ck/c0/c$/cG select the same ranges as d, then
 enter Insert. cc changes the current line; 2cc or c2c changes two lines,
 and 2c3c changes six. Whole-line changes leave one input line. Deletion
 and all typed text form one undo; Esc/Ctrl-C commits even if no text was
 typed. A pending c is cancelled by Esc/Ctrl-C. cc and c$ can start input
-in an empty buffer. Automatic indentation and registers are not supported.
+in an empty buffer. Automatic indentation is not supported.
+yy copies lines; yh/yl/yj/yk/y0/y$/yG copy the same ranges as d. Counts
+multiply, e.g. 2y3y copies six lines. Copying preserves text and undo.
+p/P put the unnamed register after/before the cursor (characters) or
+current line (whole lines); 3p repeats the contents in one undo.
+Normal d/dd/D/x and c/cc/C also fill this register; changes publish it
+when the input session commits. Undo, put and file switches preserve it.
+Line puts use LF-terminated lines, even if the original file lacked final
+LF. Named/numbered registers, system clipboard and ex yank/put are not
+implemented; ex edits and r/R do not update the unnamed register yet.
 Movement counts support hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
 and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
 Targets clamp to the buffer; g/G without a count retain first/last behavior.

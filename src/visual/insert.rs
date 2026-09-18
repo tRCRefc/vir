@@ -1,7 +1,7 @@
 use super::VisualState;
 use crate::{
     buffer::Position,
-    editor::{Editor, TextEdit},
+    editor::{Editor, Register, TextEdit},
 };
 
 impl VisualState {
@@ -43,12 +43,30 @@ impl VisualState {
         } else {
             self.column
         };
+        let register = if mode == 'C' && column < length {
+            Some(Register::characters(
+                editor.buffer(),
+                Position {
+                    row: self.row,
+                    column,
+                },
+                Position {
+                    row: self.row,
+                    column: length,
+                },
+            )?)
+        } else {
+            None
+        };
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column,
         })?;
         if mode == 'C' {
             edit.delete_to_line_end()?;
+            if let Some(register) = register {
+                edit.stage_register(register);
+            }
         }
         if mode == 'o' {
             edit.open_line_below()?;
@@ -69,11 +87,23 @@ impl VisualState {
         if self.column >= length {
             return Ok(());
         }
+        let register = Register::characters(
+            editor.buffer(),
+            Position {
+                row: self.row,
+                column: self.column,
+            },
+            Position {
+                row: self.row,
+                column: self.column + 1,
+            },
+        )?;
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column: self.column,
         })?;
         edit.delete()?;
+        edit.stage_register(register);
         edit.commit()?;
         self.column = self.column.min(length.saturating_sub(2));
         self.preferred_column = self.column;

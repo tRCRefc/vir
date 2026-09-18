@@ -267,6 +267,49 @@ def normal_actions_session(directory):
         os.close(slave)
 
 
+def register_session(directory):
+    path = directory / "registers"
+    path.write_text("one\nlast\n")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/2  col 1")
+        os.write(master, b"p")
+        receive(master, b"register is empty")
+        os.write(master, b"yy2p")
+        receive(master, b"2/4  col 1")
+        os.write(master, b"u")
+        receive(master, b"1/2  col 1")
+        os.write(master, b"ly2lp")
+        receive(master, b"onnee")
+        os.write(master, b"u")
+        receive(master, b"1/2  col 1")
+        os.write(master, b"dd")
+        receive(master, b"1/1  col 1")
+        os.write(master, b"P")
+        receive(master, b"1/2  col 1")
+        os.write(master, b"cc")
+        receive(master, b"[INSERT]")
+        os.write(master, b"NEW\x03")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"p")
+        receive(master, b"2/3  col 1")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "NEW\none\nlast\n"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 def change_session(directory):
     path = directory / "changes"
     path.write_text("ab中tail\nnext\nlast")
@@ -435,6 +478,7 @@ def line_actions_session(directory):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    register_session(Path(directory))
     change_session(Path(directory))
     operator_session(Path(directory))
     replace_session(Path(directory))

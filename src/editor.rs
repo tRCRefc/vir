@@ -1,7 +1,9 @@
 //! Shared ex/visual state. Frontends cannot independently mutate its text or dot.
 
 use std::io;
+mod register;
 mod text_edit;
+pub use register::Register;
 use std::path::{Path, PathBuf};
 pub use text_edit::TextEdit;
 
@@ -12,6 +14,7 @@ use crate::file_io;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Editor {
     buffer: TextBuffer,
+    pub(crate) unnamed: Option<Register>,
     current: Option<usize>,
     path: Option<PathBuf>,
     modified: bool,
@@ -32,6 +35,10 @@ impl Editor {
             buffer,
             ..Self::default()
         }
+    }
+
+    pub fn unnamed_register(&self) -> Option<&Register> {
+        self.unnamed.as_ref()
     }
 
     pub fn buffer(&self) -> &TextBuffer {
@@ -156,6 +163,7 @@ impl Editor {
         loaded.argument_index = self.argument_index;
         loaded.warned_remaining = self.warned_remaining;
         loaded.last_search = self.last_search.clone();
+        loaded.unnamed = self.unnamed.clone();
         *self = loaded;
         Ok(())
     }

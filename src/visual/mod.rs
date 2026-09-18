@@ -35,7 +35,9 @@ impl VisualState {
             .row
             .saturating_add(count.max(1) - 1)
             .min(editor.buffer().line_count() - 1);
+        let register = crate::editor::Register::lines(editor.buffer(), self.row, end)?;
         editor.delete_lines(self.row, end)?;
+        editor.unnamed = Some(register);
         self.row = editor.current().unwrap_or(0);
         self.column = 0;
         self.preferred_column = 0;
