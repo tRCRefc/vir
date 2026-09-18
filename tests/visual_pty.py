@@ -267,6 +267,49 @@ def normal_actions_session(directory):
         os.close(slave)
 
 
+def change_session(directory):
+    path = directory / "changes"
+    path.write_text("ab中tail\nnext\nlast")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/3  col 1")
+        os.write(master, b"llc$")
+        receive(master, b"[INSERT]")
+        os.write(master, b"XYZ\x03")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"u")
+        receive(master, "ab中tail".encode())
+        os.write(master, b"u")
+        receive(master, b"abXYZ")
+        os.write(master, b"2cc")
+        receive(master, b"[INSERT]")
+        os.write(master, "新\x03".encode())
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"u")
+        receive(master, b"abXYZ")
+        os.write(master, b"u")
+        receive(master, "新".encode())
+        os.write(master, b"ck")
+        receive(master, b"motion out of bounds")
+        os.write(master, b"c\x03")
+        receive(master, b"[VIEW]")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "新\nlast"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 def operator_session(directory):
     path = directory / "operators"
     path.write_text("a中🙂xyz\none\ntwo\nlast")
@@ -392,6 +435,7 @@ def line_actions_session(directory):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    change_session(Path(directory))
     operator_session(Path(directory))
     replace_session(Path(directory))
     line_actions_session(Path(directory))

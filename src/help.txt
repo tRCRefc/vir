@@ -78,6 +78,12 @@ lines; dG deletes through EOF, d3G through line 3. Counts multiply:
 Arrow keys, Home and End work after d. Horizontal ranges clamp at line
 boundaries; out-of-range vertical/G/$ targets fail without changing text.
 Each delete is one undo. Other d motions and registers are not supported.
+Change motions: ch/cl/cj/ck/c0/c$/cG select the same ranges as d, then
+enter Insert. cc changes the current line; 2cc or c2c changes two lines,
+and 2c3c changes six. Whole-line changes leave one input line. Deletion
+and all typed text form one undo; Esc/Ctrl-C commits even if no text was
+typed. A pending c is cancelled by Esc/Ctrl-C. cc and c$ can start input
+in an empty buffer. Automatic indentation and registers are not supported.
 Movement counts support hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
 and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
 Targets clamp to the buffer; g/G without a count retain first/last behavior.
