@@ -253,7 +253,53 @@ def normal_actions_session(directory):
         os.close(slave)
 
 
+def line_actions_session(directory):
+    path = directory / "line-actions"
+    path.write_text("ab中tail\n  next.\n  third\n)end")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/4  col 1")
+        os.write(master, b"llD")
+        receive(master, b"1/4  col 2")
+        os.write(master, b"u")
+        receive(master, "ab中tail".encode())
+        os.write(master, b"llCXYZ\x1b")
+        receive(master, b"1/4  col 5")
+        os.write(master, b"u")
+        receive(master, "ab中tail".encode())
+        os.write(master, b"u")
+        receive(master, b"abXYZ")
+        os.write(master, b"0r\x03r\r")
+        receive(master, b"replacement requires one character")
+        os.write(master, "r文".encode())
+        receive(master, "文bXYZ".encode())
+        os.write(master, b"3J")
+        receive(master, "文bXYZ next.  third".encode())
+        os.write(master, b"u")
+        receive(master, b"1/4  col 1")
+        os.write(master, b"uJ")
+        receive(master, "文bXYZ next.  third)end".encode())
+        os.write(master, b"J")
+        receive(master, b"no following line to join")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "文bXYZ next.  third)end"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    line_actions_session(Path(directory))
     normal_actions_session(Path(directory))
     insert_session(Path(directory))
     editing_session(Path(directory))

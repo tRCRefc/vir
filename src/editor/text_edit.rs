@@ -111,6 +111,74 @@ impl TextEdit<'_> {
         Ok(())
     }
 
+    /// Delete from the cursor through the end of the current line.
+    pub fn delete_to_line_end(&mut self) -> Result<(), String> {
+        let length = self
+            .draft
+            .line(self.cursor.row)
+            .unwrap_or("")
+            .chars()
+            .count();
+        if self.cursor.column >= length {
+            return Ok(());
+        }
+        let end = Position {
+            row: self.cursor.row,
+            column: length,
+        };
+        self.draft
+            .replace_text(self.cursor, end, "")
+            .map_err(str::to_owned)?;
+        Ok(())
+    }
+
+    /// Join complete lines using historical ex whitespace rules.
+    pub fn join_lines(&mut self, count: usize) -> Result<(), String> {
+        let row = self.cursor.row;
+        if row >= self.draft.line_count().saturating_sub(1) {
+            return Err("no following line to join".into());
+        }
+        let end = row
+            .saturating_add(count.max(2) - 1)
+            .min(self.draft.line_count() - 1);
+        let mut joined = self.draft.line(row).unwrap().to_owned();
+        let column = joined.chars().count();
+        for index in row + 1..=end {
+            let next = self
+                .draft
+                .line(index)
+                .unwrap()
+                .trim_start_matches([' ', '\t']);
+            if !next.is_empty()
+                && !joined.is_empty()
+                && !joined.ends_with([' ', '\t'])
+                && !next.starts_with(')')
+            {
+                if joined.ends_with('.') {
+                    joined.push(' ');
+                }
+                joined.push(' ');
+            }
+            joined.push_str(next);
+        }
+        let last_column = self.draft.line(end).unwrap().chars().count();
+        self.draft
+            .replace_text(
+                Position { row, column: 0 },
+                Position {
+                    row: end,
+                    column: last_column,
+                },
+                &joined,
+            )
+            .map_err(str::to_owned)?;
+        self.cursor = Position {
+            row,
+            column: column.min(joined.chars().count().saturating_sub(1)),
+        };
+        Ok(())
+    }
+
     pub fn commit(self) -> Result<Position, String> {
         if self.draft != self.editor.buffer {
             let row = self.cursor.row;

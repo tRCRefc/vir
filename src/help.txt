@@ -67,8 +67,17 @@ Ctrl-B/Ctrl-F. In normal mode, q or Ctrl-C checks for unsaved changes
 before exiting. i inserts before the cursor, a after it, o opens a line
 below. A appends at line end, I inserts before the first nonblank (space/
 Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
-2d3d (six lines). Esc/Ctrl-C cancels a pending count/operator. Counts
-for other commands and other d motions are rejected.
+2d3d (six lines). D deletes from the cursor to the end of the line; C
+does the same and immediately enters Insert, with deletion and typed text
+committed as one undo. Esc/Ctrl-C cancels a pending count/operator. Counts
+for other commands except J and other d motions are rejected.
+J joins two lines; a count (such as 3J) joins that many lines, clamped at
+the last line. Leading spaces/Tabs on following lines are removed. A
+space separates text, two after a period, none before a closing parenthesis
+or after existing whitespace. The whole join is one undo; final LF is preserved.
+Normal r waits for one printable character and replaces the character under
+the cursor as one undo; Esc/Ctrl-C cancels it and end-of-line replacement is
+rejected.
 [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
 Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys

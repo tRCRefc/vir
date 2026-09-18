@@ -110,6 +110,7 @@ enum PrefixAction {
     Pass,
     Pending,
     Delete(usize),
+    Join(usize),
 }
 
 impl NormalPrefix {
@@ -151,9 +152,14 @@ impl NormalPrefix {
             self.digits = 0;
             return Ok(PrefixAction::Pending);
         }
+        if key.code == KeyCode::Char('J') && self.operator_count.is_none() {
+            let count = self.digits.max(2);
+            *self = Self::default();
+            return Ok(PrefixAction::Join(count));
+        }
         *self = Self::default();
         if active {
-            Err("only counted dd is supported; command cancelled")
+            Err("only counted dd/J are supported; command cancelled")
         } else {
             Ok(PrefixAction::Pass)
         }
@@ -260,6 +266,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
     let mut prefix = NormalPrefix::default();
+    let mut replace_pending = false;
     let (mut width, mut height) = terminal::size()?;
     loop {
         let name = editor
@@ -339,8 +346,32 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
+                if replace_pending {
+                    replace_pending = false;
+                    if key.code == KeyCode::Esc
+                        || key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    {
+                        continue;
+                    }
+                    if let KeyCode::Char(character) = key.code {
+                        if let Err(error) = state.replace_character(editor, character) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                    } else {
+                        command.message = Some("? replacement requires one character".into());
+                    }
+                    continue;
+                }
                 match prefix.key(key) {
                     Ok(PrefixAction::Pending) => continue,
+                    Ok(PrefixAction::Join(count)) => {
+                        if let Err(error) = state.join_lines(editor, count) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
                     Ok(PrefixAction::Delete(count)) => {
                         if let Err(error) = state.delete_lines(editor, count) {
                             command.message = Some(format!("? {error}"));
@@ -357,7 +388,9 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
-                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o' | 'I' | 'A' | 'O')) = key.code {
+                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C')) =
+                        key.code
+                    {
                         insert_mode(editor, &mut state, mode, &mut width, &mut height)?;
                         continue;
                     }
@@ -369,6 +402,24 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                         if let Err(error) = state.delete_character(editor) {
                             command.message = Some(format!("? {error}"));
                         }
+                        continue;
+                    }
+                    if key.code == KeyCode::Char('D') {
+                        let position = crate::buffer::Position {
+                            row: state.row,
+                            column: state.column,
+                        };
+                        match editor.begin_text_edit(position).and_then(|mut edit| {
+                            edit.delete_to_line_end()?;
+                            edit.commit()
+                        }) {
+                            Ok(_) => {}
+                            Err(error) => command.message = Some(format!("? {error}")),
+                        }
+                        continue;
+                    }
+                    if key.code == KeyCode::Char('r') {
+                        replace_pending = true;
                         continue;
                     }
                 }
@@ -441,7 +492,14 @@ mod tests {
             }
             assert_eq!(prefix.key(key('d')), Ok(PrefixAction::Delete(count)));
         }
-        for sequence in ["3i", "dq", "d0", "9x"] {
+        for (sequence, count) in [("J", 2), ("1J", 2), ("3J", 3)] {
+            for c in sequence[..sequence.len() - 1].chars() {
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
+            }
+            assert_eq!(prefix.key(key('J')), Ok(PrefixAction::Join(count)));
+            assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
+        }
+        for sequence in ["3i", "dq", "d0", "9x", "dJ", "2C", "3D", "2r"] {
             for c in sequence[..sequence.len() - 1].chars() {
                 prefix.key(key(c)).unwrap();
             }
