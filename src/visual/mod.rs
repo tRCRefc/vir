@@ -7,7 +7,7 @@ use crate::buffer::TextBuffer;
 pub use terminal::run;
 use unicode_width::UnicodeWidthChar;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
     Left,
     Right,
@@ -115,30 +115,52 @@ pub fn clip(line: &str, left: usize, width: usize) -> String {
 
 impl VisualState {
     pub fn move_cursor(&mut self, motion: Motion, buffer: &TextBuffer, height: u16) {
+        self.move_counted(motion, None, buffer, height);
+    }
+
+    pub fn move_counted(
+        &mut self,
+        motion: Motion,
+        count: Option<usize>,
+        buffer: &TextBuffer,
+        height: u16,
+    ) {
         if buffer.is_empty() {
             return;
         }
+        let steps = count.unwrap_or(1).max(1);
         let last = buffer.line_count() - 1;
-        let page = usize::from(height.saturating_sub(1).max(1));
+        let page = usize::from(height.saturating_sub(1).max(1)).saturating_mul(steps);
         let vertical = matches!(
             motion,
             Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown
         );
         match motion {
-            Motion::Left => self.column = self.column.saturating_sub(1),
-            Motion::Right => self.column = self.column.saturating_add(1),
-            Motion::Up => self.row = self.row.saturating_sub(1),
-            Motion::Down => self.row = self.row.saturating_add(1).min(last),
+            Motion::Left => self.column = self.column.saturating_sub(steps),
+            Motion::Right => self.column = self.column.saturating_add(steps),
+            Motion::Up => self.row = self.row.saturating_sub(steps),
+            Motion::Down => self.row = self.row.saturating_add(steps).min(last),
             Motion::PageUp => self.row = self.row.saturating_sub(page),
             Motion::PageDown => self.row = self.row.saturating_add(page).min(last),
             Motion::Home => self.column = 0,
-            Motion::End => self.column = usize::MAX,
+            Motion::End => {
+                self.row = self.row.saturating_add(steps - 1).min(last);
+                self.column = usize::MAX;
+            }
             Motion::First => {
-                self.row = 0;
+                self.row = if count.is_some() {
+                    steps.saturating_sub(1).min(last)
+                } else {
+                    0
+                };
                 self.column = 0;
             }
             Motion::Last => {
-                self.row = last;
+                self.row = if count.is_some() {
+                    steps.saturating_sub(1).min(last)
+                } else {
+                    last
+                };
                 self.column = 0;
             }
         }

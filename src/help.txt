@@ -70,7 +70,12 @@ Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
 2d3d (six lines). D deletes from the cursor to the end of the line; C
 does the same and immediately enters Insert, with deletion and typed text
 committed as one undo. Esc/Ctrl-C cancels a pending count/operator. Counts
-for other commands except J and other d motions are rejected.
+for other editing commands and other d motions are rejected.
+Movement counts support hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
+and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
+Targets clamp to the buffer; g/G without a count retain first/last behavior.
+Home ignores the count; 0 by itself moves to line start, digits such as
+10j form one count. Movement never changes text or undo.
 J joins two lines; a count (such as 3J) joins that many lines, clamped at
 the last line. Leading spaces/Tabs on following lines are removed. A
 space separates text, two after a period, none before a closing parenthesis

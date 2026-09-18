@@ -111,11 +111,22 @@ enum PrefixAction {
     Pending,
     Delete(usize),
     Join(usize),
+    Move(Motion, usize),
 }
 
 impl NormalPrefix {
     fn key(&mut self, key: KeyEvent) -> Result<PrefixAction, &'static str> {
         let active = self.digits != 0 || self.operator_count.is_some();
+        if self.digits != 0
+            && self.operator_count.is_none()
+            && !matches!(key.code, KeyCode::Char('0'..='9'))
+            && let Some(motion) = normal_motion(key)
+        {
+            let count = self.digits;
+            *self = Self::default();
+            return Ok(PrefixAction::Move(motion, count));
+        }
+
         if key.code == KeyCode::Esc
             || key
                 .modifiers
@@ -159,10 +170,36 @@ impl NormalPrefix {
         }
         *self = Self::default();
         if active {
-            Err("only counted dd/J are supported; command cancelled")
+            Err("unsupported count or operator; command cancelled")
         } else {
             Ok(PrefixAction::Pass)
         }
+    }
+}
+
+fn normal_motion(key: KeyEvent) -> Option<Motion> {
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return None;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return match key.code {
+            KeyCode::Char('f') => Some(Motion::PageDown),
+            KeyCode::Char('b') => Some(Motion::PageUp),
+            _ => None,
+        };
+    }
+    match key.code {
+        KeyCode::Char('h') | KeyCode::Left => Some(Motion::Left),
+        KeyCode::Char('j') | KeyCode::Down => Some(Motion::Down),
+        KeyCode::Char('k') | KeyCode::Up => Some(Motion::Up),
+        KeyCode::Char('l') | KeyCode::Right => Some(Motion::Right),
+        KeyCode::Char('0') | KeyCode::Home => Some(Motion::Home),
+        KeyCode::Char('$') | KeyCode::End => Some(Motion::End),
+        KeyCode::Char('g') => Some(Motion::First),
+        KeyCode::Char('G') => Some(Motion::Last),
+        KeyCode::PageUp => Some(Motion::PageUp),
+        KeyCode::PageDown => Some(Motion::PageDown),
+        _ => None,
     }
 }
 
@@ -395,6 +432,10 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                 }
                 match prefix.key(key) {
                     Ok(PrefixAction::Pending) => continue,
+                    Ok(PrefixAction::Move(motion, count)) => {
+                        state.move_counted(motion, Some(count), editor.buffer(), height);
+                        continue;
+                    }
                     Ok(PrefixAction::Join(count)) => {
                         if let Err(error) = state.join_lines(editor, count) {
                             command.message = Some(format!("? {error}"));
@@ -479,25 +520,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     }
                     continue;
                 }
-                let motion = match key.code {
-                    KeyCode::Char('h') | KeyCode::Left => Some(Motion::Left),
-                    KeyCode::Char('j') | KeyCode::Down => Some(Motion::Down),
-                    KeyCode::Char('k') | KeyCode::Up => Some(Motion::Up),
-                    KeyCode::Char('l') | KeyCode::Right => Some(Motion::Right),
-                    KeyCode::Char('0') | KeyCode::Home => Some(Motion::Home),
-                    KeyCode::Char('$') | KeyCode::End => Some(Motion::End),
-                    KeyCode::Char('g') => Some(Motion::First),
-                    KeyCode::Char('G') => Some(Motion::Last),
-                    KeyCode::PageUp => Some(Motion::PageUp),
-                    KeyCode::PageDown => Some(Motion::PageDown),
-                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        Some(Motion::PageDown)
-                    }
-                    KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        Some(Motion::PageUp)
-                    }
-                    _ => None,
-                };
+                let motion = normal_motion(key);
                 if let Some(motion) = motion {
                     state.move_cursor(motion, editor.buffer(), height);
                 }
@@ -548,6 +571,30 @@ mod tests {
     fn normal_prefix_counts_cancel_and_reject_overflow_without_leaking() {
         let mut prefix = NormalPrefix::default();
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        for (sequence, motion, count) in [
+            ("10j", Motion::Down, 10),
+            ("2$", Motion::End, 2),
+            ("5G", Motion::Last, 5),
+        ] {
+            for c in sequence[..sequence.len() - 1].chars() {
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
+            }
+            assert_eq!(
+                prefix.key(key(sequence.chars().last().unwrap())),
+                Ok(PrefixAction::Move(motion, count))
+            );
+            assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
+        }
+        for (code, modifiers, motion) in [
+            (KeyCode::Right, KeyModifiers::NONE, Motion::Right),
+            (KeyCode::Char('f'), KeyModifiers::CONTROL, Motion::PageDown),
+        ] {
+            prefix.key(key('2')).unwrap();
+            assert_eq!(
+                prefix.key(KeyEvent::new(code, modifiers)),
+                Ok(PrefixAction::Move(motion, 2))
+            );
+        }
         for (sequence, count) in [("dd", 1), ("10dd", 10), ("d20d", 20), ("2d3d", 6)] {
             for c in sequence[..sequence.len() - 1].chars() {
                 assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
