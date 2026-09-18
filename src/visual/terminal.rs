@@ -112,6 +112,7 @@ enum PrefixAction {
     Delete(usize),
     Join(usize),
     Move(Motion, usize),
+    DeleteMotion(Motion, Option<usize>),
 }
 
 impl NormalPrefix {
@@ -155,13 +156,35 @@ impl NormalPrefix {
         }
         if key.code == KeyCode::Char('d') {
             if let Some(before) = self.operator_count {
-                let count = before.checked_mul(self.digits.max(1));
+                let count = before.max(1).checked_mul(self.digits.max(1));
                 *self = Self::default();
                 return count.map(PrefixAction::Delete).ok_or("count too large");
             }
-            self.operator_count = Some(self.digits.max(1));
+            self.operator_count = Some(self.digits);
             self.digits = 0;
             return Ok(PrefixAction::Pending);
+        }
+        if let Some(before) = self.operator_count {
+            let count = before.max(1).checked_mul(self.digits.max(1));
+            let explicit = before != 0 || self.digits != 0;
+            *self = Self::default();
+            let count = count.ok_or("count too large")?;
+            if let Some(
+                motion @ (Motion::Left
+                | Motion::Right
+                | Motion::Up
+                | Motion::Down
+                | Motion::Home
+                | Motion::End
+                | Motion::Last),
+            ) = normal_motion(key)
+            {
+                return Ok(PrefixAction::DeleteMotion(
+                    motion,
+                    explicit.then_some(count),
+                ));
+            }
+            return Err("unsupported delete motion; command cancelled");
         }
         if key.code == KeyCode::Char('J') && self.operator_count.is_none() {
             let count = self.digits.max(2);
@@ -432,6 +455,12 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                 }
                 match prefix.key(key) {
                     Ok(PrefixAction::Pending) => continue,
+                    Ok(PrefixAction::DeleteMotion(motion, count)) => {
+                        if let Err(error) = state.delete_motion(editor, motion, count) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
                     Ok(PrefixAction::Move(motion, count)) => {
                         state.move_counted(motion, Some(count), editor.buffer(), height);
                         continue;
@@ -595,6 +624,22 @@ mod tests {
                 Ok(PrefixAction::Move(motion, 2))
             );
         }
+        for (sequence, motion, count) in [
+            ("d0", Motion::Home, None),
+            ("dG", Motion::Last, None),
+            ("1dG", Motion::Last, Some(1)),
+            ("2d3l", Motion::Right, Some(6)),
+            ("d10j", Motion::Down, Some(10)),
+        ] {
+            for c in sequence[..sequence.len() - 1].chars() {
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
+            }
+            assert_eq!(
+                prefix.key(key(sequence.chars().last().unwrap())),
+                Ok(PrefixAction::DeleteMotion(motion, count))
+            );
+            assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
+        }
         for (sequence, count) in [("dd", 1), ("10dd", 10), ("d20d", 20), ("2d3d", 6)] {
             for c in sequence[..sequence.len() - 1].chars() {
                 assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
@@ -608,7 +653,7 @@ mod tests {
             assert_eq!(prefix.key(key('J')), Ok(PrefixAction::Join(count)));
             assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
         }
-        for sequence in ["3i", "dq", "d0", "9x", "dJ", "2C", "3D", "2r"] {
+        for sequence in ["3i", "dq", "dg", "9x", "dJ", "2C", "3D", "2r"] {
             for c in sequence[..sequence.len() - 1].chars() {
                 prefix.key(key(c)).unwrap();
             }

@@ -70,7 +70,14 @@ Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
 2d3d (six lines). D deletes from the cursor to the end of the line; C
 does the same and immediately enters Insert, with deletion and typed text
 committed as one undo. Esc/Ctrl-C cancels a pending count/operator. Counts
-for other editing commands and other d motions are rejected.
+for other editing commands are rejected.
+Delete motions: dh/dl remove characters left/right; d0 deletes up to the
+cursor, d$ through line end. dj/dk delete both current and destination
+lines; dG deletes through EOF, d3G through line 3. Counts multiply:
+2d3l deletes six characters; d2$ deletes through the next line end.
+Arrow keys, Home and End work after d. Horizontal ranges clamp at line
+boundaries; out-of-range vertical/G/$ targets fail without changing text.
+Each delete is one undo. Other d motions and registers are not supported.
 Movement counts support hjkl/arrows, $/End, g/G, Home, PageUp/PageDown
 and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
 Targets clamp to the buffer; g/G without a count retain first/last behavior.

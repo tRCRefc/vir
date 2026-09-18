@@ -73,6 +73,15 @@ impl TextEdit<'_> {
     pub fn buffer(&self) -> &TextBuffer {
         &self.draft
     }
+
+    pub fn delete_range(&mut self, start: Position, end: Position) -> Result<(), String> {
+        self.cursor = self
+            .draft
+            .replace_text(start, end, "")
+            .map_err(str::to_owned)?;
+        self.replacements.clear();
+        Ok(())
+    }
     pub fn cursor(&self) -> Position {
         self.cursor
     }

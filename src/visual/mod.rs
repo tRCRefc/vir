@@ -1,6 +1,7 @@
 //! Visual frontend with search and ex editing commands. Layout is independent of terminal I/O.
 mod command;
 mod insert;
+mod operator;
 mod search;
 mod terminal;
 use crate::buffer::TextBuffer;
