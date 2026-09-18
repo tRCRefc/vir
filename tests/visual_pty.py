@@ -253,6 +253,44 @@ def normal_actions_session(directory):
         os.close(slave)
 
 
+def replace_session(directory):
+    path = directory / "replace-text"
+    path.write_text("a中z\nlast")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"[VIEW]")
+        os.write(master, "lR🙂XY".encode())
+        receive(master, "a🙂XY".encode())
+        os.write(master, b"\x7f\x7f\rQ\x7f\x7f")
+        receive(master, "a🙂z".encode())
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 4, 25, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[4;1H[REPLACE]")
+        os.write(master, b"\x03")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"u")
+        receive(master, "a中z".encode())
+        os.write(master, b"u")
+        receive(master, "a🙂z".encode())
+        os.write(master, b"R\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "a🙂z\nlast"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 def line_actions_session(directory):
     path = directory / "line-actions"
     path.write_text("ab中tail\n  next.\n  third\n)end")
@@ -299,6 +337,7 @@ def line_actions_session(directory):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    replace_session(Path(directory))
     line_actions_session(Path(directory))
     normal_actions_session(Path(directory))
     insert_session(Path(directory))

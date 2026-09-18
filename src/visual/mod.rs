@@ -159,7 +159,7 @@ impl VisualState {
     }
 
     pub fn frame(&mut self, buffer: &TextBuffer, name: &str, width: u16, height: u16) -> Frame {
-        self.layout(buffer, name, width, height, false)
+        self.layout(buffer, name, width, height, "VIEW")
     }
 
     pub fn insert_frame(
@@ -169,7 +169,17 @@ impl VisualState {
         width: u16,
         height: u16,
     ) -> Frame {
-        self.layout(buffer, name, width, height, true)
+        self.layout(buffer, name, width, height, "INSERT")
+    }
+
+    pub fn replace_frame(
+        &mut self,
+        buffer: &TextBuffer,
+        name: &str,
+        width: u16,
+        height: u16,
+    ) -> Frame {
+        self.layout(buffer, name, width, height, "REPLACE")
     }
 
     fn layout(
@@ -178,8 +188,9 @@ impl VisualState {
         name: &str,
         width: u16,
         height: u16,
-        inserting: bool,
+        mode: &str,
     ) -> Frame {
+        let inserting = mode != "VIEW";
         // Reserve the final column to avoid terminal autowrap at bottom-right.
         let columns = usize::from(width.saturating_sub(1));
         let rows = usize::from(height.saturating_sub(1));
@@ -211,7 +222,7 @@ impl VisualState {
         let status = clip(
             &format!(
                 "[{}] {name}  {}/{}  col {}  {}",
-                if inserting { "INSERT" } else { "VIEW" },
+                mode,
                 if buffer.is_empty() { 0 } else { self.row + 1 },
                 buffer.line_count(),
                 self.column + 1,

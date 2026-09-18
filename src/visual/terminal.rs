@@ -195,7 +195,11 @@ fn insert_mode(
             let position = edit.cursor();
             state.row = position.row;
             state.column = position.column;
-            let frame = state.insert_frame(edit.buffer(), &name, *width, *height);
+            let frame = if mode == 'R' {
+                state.replace_frame(edit.buffer(), &name, *width, *height)
+            } else {
+                state.insert_frame(edit.buffer(), &name, *width, *height)
+            };
             let mut output = io::stdout().lock();
             queue!(
                 output,
@@ -221,7 +225,12 @@ fn insert_mode(
                 }
                 Event::Key(key)
                     if key.kind != KeyEventKind::Release
-                        && insert_key(&mut edit, key).map_err(io::Error::other)? =>
+                        && (if mode == 'R' {
+                            replace_key(&mut edit, key)
+                        } else {
+                            insert_key(&mut edit, key)
+                        })
+                        .map_err(io::Error::other)? =>
                 {
                     return Ok(());
                 }
@@ -250,6 +259,26 @@ fn insert_key(edit: &mut crate::editor::TextEdit<'_>, key: KeyEvent) -> Result<b
                 && !c.is_control() =>
         {
             edit.insert(&c.to_string())?
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn replace_key(edit: &mut crate::editor::TextEdit<'_>, key: KeyEvent) -> Result<bool, String> {
+    match key.code {
+        KeyCode::Esc => return Ok(true),
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
+        KeyCode::Backspace => edit.replace_backspace()?,
+        KeyCode::Enter => edit.replace_input('\n')?,
+        KeyCode::Tab => edit.replace_input('\t')?,
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !c.is_control() =>
+        {
+            edit.replace_input(c)?
         }
         _ => {}
     }
@@ -388,7 +417,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
-                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C')) =
+                    if let KeyCode::Char(mode @ ('i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C' | 'R')) =
                         key.code
                     {
                         insert_mode(editor, &mut state, mode, &mut width, &mut height)?;
@@ -481,6 +510,39 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_keys_commit_cancel_and_ignore_navigation() {
+        for exit in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            let mut editor = Editor::default();
+            let mut edit = editor
+                .begin_text_edit(crate::buffer::Position::default())
+                .unwrap();
+            for code in [
+                KeyCode::Char('中'),
+                KeyCode::Tab,
+                KeyCode::Enter,
+                KeyCode::Char('x'),
+                KeyCode::Backspace,
+                KeyCode::Backspace,
+            ] {
+                assert!(!replace_key(&mut edit, KeyEvent::new(code, KeyModifiers::NONE)).unwrap());
+            }
+            let before = edit.buffer().clone();
+            for code in [KeyCode::Left, KeyCode::Delete] {
+                assert!(!replace_key(&mut edit, KeyEvent::new(code, KeyModifiers::NONE)).unwrap());
+            }
+            assert_eq!(edit.buffer(), &before);
+            assert!(replace_key(&mut edit, exit).unwrap());
+            edit.commit().unwrap();
+            assert_eq!(editor.buffer().to_text(), "中\t\n");
+            editor.undo().unwrap();
+            assert!(editor.buffer().is_empty());
+        }
+    }
 
     #[test]
     fn normal_prefix_counts_cancel_and_reject_overflow_without_leaking() {

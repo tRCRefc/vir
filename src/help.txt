@@ -78,6 +78,11 @@ or after existing whitespace. The whole join is one undo; final LF is preserved.
 Normal r waits for one printable character and replaces the character under
 the cursor as one undo; Esc/Ctrl-C cancels it and end-of-line replacement is
 rejected.
+Normal R enters [REPLACE]: each Unicode scalar overwrites one character,
+then appends at line end. Tab replaces one scalar; Enter splits the line.
+Backspace restores the previous Replace keystroke, including a split or
+append, and stops at session entry. Esc/Ctrl-C commits one undo for the
+whole session. Arrow keys and Delete are ignored; R counts are unsupported.
 [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
 Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys

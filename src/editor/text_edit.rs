@@ -6,6 +6,7 @@ pub struct TextEdit<'a> {
     editor: &'a mut Editor,
     draft: TextBuffer,
     cursor: Position,
+    replacements: Vec<(Position, Position, String, bool)>,
 }
 
 impl Editor {
@@ -17,11 +18,58 @@ impl Editor {
             draft: self.buffer.clone(),
             editor: self,
             cursor,
+            replacements: Vec::new(),
         })
     }
 }
 
 impl TextEdit<'_> {
+    /// Type one scalar in Replace mode; LF splits rather than overwrites.
+    pub fn replace_input(&mut self, character: char) -> Result<(), String> {
+        if character.is_control() && character != '\n' && character != '\t' {
+            return Err("unsupported replacement character".into());
+        }
+        let start = self.cursor;
+        let old = if character == '\n' {
+            None
+        } else {
+            self.draft
+                .line(start.row)
+                .and_then(|line| line.chars().nth(start.column))
+        };
+        let end = Position {
+            column: start.column + usize::from(old.is_some()),
+            ..start
+        };
+        let was_empty = self.draft.is_empty();
+        self.cursor = self
+            .draft
+            .replace_text(start, end, &character.to_string())
+            .map_err(str::to_owned)?;
+        self.replacements.push((
+            start,
+            self.cursor,
+            old.map_or_else(String::new, |c| c.to_string()),
+            was_empty,
+        ));
+        Ok(())
+    }
+
+    /// Reverse the most recent Replace keystroke, stopping at session entry.
+    pub fn replace_backspace(&mut self) -> Result<(), String> {
+        if let Some((start, end, old, was_empty)) = self.replacements.last() {
+            self.draft
+                .replace_text(*start, *end, old)
+                .map_err(str::to_owned)?;
+            if *was_empty {
+                self.draft = TextBuffer::default();
+            }
+            self.cursor = *start;
+            self.replacements.pop();
+        }
+        Ok(())
+    }
+
     pub fn buffer(&self) -> &TextBuffer {
         &self.draft
     }

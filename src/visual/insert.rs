@@ -22,7 +22,7 @@ impl VisualState {
         editor: &'a mut Editor,
         mode: char,
     ) -> Result<TextEdit<'a>, String> {
-        if !matches!(mode, 'i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C') {
+        if !matches!(mode, 'i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C' | 'R') {
             return Err("unsupported insert mode".into());
         }
         let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
