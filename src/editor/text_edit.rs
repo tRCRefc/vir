@@ -2,12 +2,23 @@
 use super::Editor;
 use crate::buffer::{Position, TextBuffer};
 
+/// Logical text input, independent of terminal key encoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputAction {
+    Insert(String),
+    Backspace,
+    Delete,
+    Replace(char),
+    RestoreReplacement,
+}
+
 pub struct TextEdit<'a> {
     editor: &'a mut Editor,
     draft: TextBuffer,
     cursor: Position,
     pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
+    input_actions: Option<Vec<InputAction>>,
 }
 
 impl Editor {
@@ -21,11 +32,46 @@ impl Editor {
             cursor,
             replacements: Vec::new(),
             pending_register: None,
+            input_actions: None,
         })
     }
 }
 
 impl TextEdit<'_> {
+    pub fn has_changes(&self) -> bool {
+        self.draft != self.editor.buffer
+    }
+
+    pub(crate) fn record_input(&mut self) {
+        self.input_actions = Some(Vec::new());
+    }
+
+    pub(crate) fn take_input_actions(&mut self) -> Vec<InputAction> {
+        self.input_actions.take().unwrap_or_default()
+    }
+
+    fn record(&mut self, action: InputAction) {
+        if let Some(actions) = &mut self.input_actions {
+            if let (Some(InputAction::Insert(previous)), InputAction::Insert(text)) =
+                (actions.last_mut(), &action)
+            {
+                previous.push_str(text);
+            } else {
+                actions.push(action);
+            }
+        }
+    }
+
+    pub fn apply_input(&mut self, action: &InputAction) -> Result<(), String> {
+        match action {
+            InputAction::Insert(text) => self.insert(text),
+            InputAction::Backspace => self.backspace(),
+            InputAction::Delete => self.delete(),
+            InputAction::Replace(c) => self.replace_input(*c),
+            InputAction::RestoreReplacement => self.replace_backspace(),
+        }
+    }
+
     /// Type one scalar in Replace mode; LF splits rather than overwrites.
     pub fn replace_input(&mut self, character: char) -> Result<(), String> {
         if character.is_control() && character != '\n' && character != '\t' {
@@ -54,6 +100,7 @@ impl TextEdit<'_> {
             old.map_or_else(String::new, |c| c.to_string()),
             was_empty,
         ));
+        self.record(InputAction::Replace(character));
         Ok(())
     }
 
@@ -68,6 +115,7 @@ impl TextEdit<'_> {
             }
             self.cursor = *start;
             self.replacements.pop();
+            self.record(InputAction::RestoreReplacement);
         }
         Ok(())
     }
@@ -119,6 +167,9 @@ impl TextEdit<'_> {
             .draft
             .replace_text(self.cursor, self.cursor, text)
             .map_err(str::to_owned)?;
+        if !text.is_empty() && self.input_actions.is_some() {
+            self.record(InputAction::Insert(text.to_owned()));
+        }
         Ok(())
     }
 
@@ -145,6 +196,7 @@ impl TextEdit<'_> {
             .draft
             .replace_text(start, self.cursor, "")
             .map_err(str::to_owned)?;
+        self.record(InputAction::Backspace);
         Ok(())
     }
 
@@ -171,6 +223,7 @@ impl TextEdit<'_> {
         self.draft
             .replace_text(self.cursor, end, "")
             .map_err(str::to_owned)?;
+        self.record(InputAction::Delete);
         Ok(())
     }
 

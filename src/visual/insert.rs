@@ -1,4 +1,4 @@
-use super::VisualState;
+use super::{Motion, VisualState, repeat::ChangeRecord};
 use crate::{
     buffer::Position,
     editor::{Editor, Register, TextEdit},
@@ -14,6 +14,7 @@ impl VisualState {
         let position = edit.commit()?;
         self.column = position.column;
         self.preferred_column = self.column;
+        self.last_change = Some(ChangeRecord::Join(count.max(2)));
         Ok(())
     }
 
@@ -73,6 +74,7 @@ impl VisualState {
         } else if mode == 'O' {
             edit.open_line_above()?;
         }
+        edit.record_input();
         Ok(edit)
     }
 
@@ -107,6 +109,10 @@ impl VisualState {
         edit.commit()?;
         self.column = self.column.min(length.saturating_sub(2));
         self.preferred_column = self.column;
+        self.last_change = Some(ChangeRecord::Delete {
+            motion: Some(Motion::Right),
+            count: Some(1),
+        });
         Ok(())
     }
 
@@ -115,20 +121,58 @@ impl VisualState {
         editor: &mut Editor,
         replacement: char,
     ) -> Result<(), String> {
+        self.replace_counted(editor, replacement, 1)
+    }
+
+    pub(super) fn replace_counted(
+        &mut self,
+        editor: &mut Editor,
+        replacement: char,
+        count: usize,
+    ) -> Result<(), String> {
         if replacement == '\n' || replacement == '\r' || replacement.is_control() {
             return Err("replacement must be a printable character".into());
         }
         let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
-        if self.column >= length {
-            return Err("cursor is at end of line".into());
+        let count = count.max(1);
+        let end = self
+            .column
+            .checked_add(count)
+            .filter(|end| *end <= length)
+            .ok_or("not enough characters to replace")?;
+        let changed = editor
+            .buffer()
+            .line(self.row)
+            .unwrap()
+            .chars()
+            .skip(self.column)
+            .take(count)
+            .any(|c| c != replacement);
+        if !changed {
+            return Ok(());
         }
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column: self.column,
         })?;
-        edit.delete()?;
-        edit.insert(&replacement.to_string())?;
+        edit.delete_range(
+            Position {
+                row: self.row,
+                column: self.column,
+            },
+            Position {
+                row: self.row,
+                column: end,
+            },
+        )?;
+        edit.insert(&replacement.to_string().repeat(count))?;
         edit.commit()?;
+        self.column = end - 1;
+        self.preferred_column = self.column;
+        self.last_change = Some(ChangeRecord::Replace {
+            character: replacement,
+            count,
+        });
         Ok(())
     }
 }

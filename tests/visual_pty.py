@@ -597,7 +597,90 @@ def word_operator_session(directory):
         os.close(slave)
 
 
+def repeat_session(directory):
+    path = directory / "repeat"
+    path.write_text("one two three four\nalpha beta\nlast")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 7, 120, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/3  col 1")
+        os.write(master, b".")
+        receive(master, b"no change to repeat")
+        os.write(master, "cw中".encode())
+        receive(master, "中 two three four".encode())
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        for keys, text in [
+            (b"w.", "中 中 three four"),
+            (b"u", "中 two three four"),
+            (b"u", "中 中 three four"),
+            (b"g0w2.", "中 中 four"),
+        ]:
+            os.write(master, keys)
+            receive(master, text.encode())
+        os.write(master, b"g0A!")
+        receive(master, "中 中 four!".encode())
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        for keys, text in [
+            (b"2.", "中 中 four!!!"),
+            (b".", "中 中 four!!!!!"),
+            (b"u", "中 中 four!!!"),
+            (b"u", "中 中 four!!!!!"),
+        ]:
+            os.write(master, keys)
+            receive(master, text.encode())
+        os.write(master, b"j0RXY\x7fZ")
+        receive(master, b"XZpha beta")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b"w.")
+        receive(master, b"XZpha XZta")
+        os.write(master, b"u")
+        receive(master, b"XZpha beta")
+        os.write(master, b"u")
+        receive(master, b"XZpha XZta")
+        os.write(master, b"/four\r")
+        receive(master, b"1/3  col 5")
+        os.write(master, b"rQ")
+        receive(master, "中 中 Qour!!!!!".encode())
+        os.write(master, b"999.")
+        receive(master, b"not enough characters to replace")
+        os.write(master, b"l.")
+        receive(master, "中 中 QQur!!!!!".encode())
+        os.write(master, b"9\x1b")
+        receive(master, b"[VIEW]")
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 5, 120, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[5;1H[VIEW]")
+        os.write(master, f":w {directory}\r".encode())
+        receive(master, b"? ")
+        os.write(master, b":w\r")
+        receive(master, b"Written")
+        expected = "中 中 QQur!!!!!\nXZpha XZta\nlast"
+        assert path.read_text() == expected
+        os.write(master, b":e!\r")
+        receive(master, b"3/3  col 1")
+        os.write(master, b"G0.")
+        receive(master, b"Qast")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == expected.replace("last", "Qast")
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    repeat_session(Path(directory))
     word_operator_session(Path(directory))
     word_session(Path(directory))
     register_session(Path(directory))

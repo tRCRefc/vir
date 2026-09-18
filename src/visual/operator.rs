@@ -2,6 +2,7 @@
 use super::{
     Motion, VisualState,
     motion::{Endpoint, word_endpoint},
+    repeat::ChangeRecord,
 };
 use crate::{
     buffer::{Position, TextBuffer},
@@ -209,6 +210,10 @@ impl VisualState {
         self.preferred_column = self.column;
         self.top = self.top.min(self.row);
         self.left = 0;
+        self.last_change = Some(ChangeRecord::Delete {
+            motion: Some(motion),
+            count,
+        });
         Ok(())
     }
 
@@ -282,6 +287,7 @@ impl VisualState {
         self.preferred_column = self.column;
         self.top = self.top.min(self.row);
         self.left = 0;
+        self.last_change = Some(ChangeRecord::Put { before, count });
         Ok(())
     }
 
@@ -329,7 +335,9 @@ impl VisualState {
                 })
                 .map_err(str::to_owned)?;
             if editor.buffer().is_empty() {
-                return editor.begin_text_edit(Position::default());
+                let mut edit = editor.begin_text_edit(Position::default())?;
+                edit.record_input();
+                return Ok(edit);
             }
             EditRange::Lines(
                 self.row,
@@ -355,6 +363,7 @@ impl VisualState {
         let mut edit = editor.begin_text_edit(start)?;
         edit.delete_range(start, end)?;
         edit.stage_register(register);
+        edit.record_input();
         Ok(edit)
     }
 }

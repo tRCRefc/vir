@@ -1,5 +1,5 @@
 use super::operator::Operator;
-use super::{Motion, VisualState, clip, screen_column};
+use super::{InputStart, Motion, VisualState, clip, screen_column};
 use crate::editor::Editor;
 use crossterm::{
     cursor,
@@ -113,6 +113,7 @@ enum PrefixAction {
     Pending,
     Join(usize),
     Move(Motion, usize),
+    Repeat(Option<usize>),
     Operate(Operator, Option<Motion>, Option<usize>),
     Put(bool, usize),
 }
@@ -191,6 +192,11 @@ impl NormalPrefix {
             }
             return Err("unsupported operator motion; command cancelled");
         }
+        if key.code == KeyCode::Char('.') {
+            let count = (self.digits != 0).then_some(self.digits);
+            *self = Self::default();
+            return Ok(PrefixAction::Repeat(count));
+        }
         if matches!(key.code, KeyCode::Char('p' | 'P')) {
             let count = self.digits.max(1);
             *self = Self::default();
@@ -266,7 +272,15 @@ fn insert_mode(
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "[No file]".into());
     let edit = state.begin_insert(editor, mode).map_err(io::Error::other)?;
-    input_session(edit, state, mode, &name, width, height)
+    input_session(
+        edit,
+        state,
+        mode,
+        &name,
+        width,
+        height,
+        InputStart::Insert(mode),
+    )
 }
 
 fn input_session(
@@ -276,6 +290,7 @@ fn input_session(
     name: &str,
     width: &mut u16,
     height: &mut u16,
+    start: InputStart,
 ) -> io::Result<()> {
     let result = (|| -> io::Result<()> {
         loop {
@@ -326,8 +341,7 @@ fn input_session(
         }
     })();
     // Retain typed text in the editor even when terminal I/O fails.
-    let position = edit.commit().map_err(io::Error::other)?;
-    state.finish_insert(position);
+    state.commit_input(edit, start).map_err(io::Error::other)?;
     result
 }
 
@@ -482,6 +496,12 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                 }
                 match prefix.key(key) {
                     Ok(PrefixAction::Pending) => continue,
+                    Ok(PrefixAction::Repeat(count)) => {
+                        if let Err(error) = state.repeat_change(editor, count) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
                     Ok(PrefixAction::Operate(Operator::Yank, motion, count)) => {
                         if let Err(error) = state.yank(editor, motion, count) {
                             command.message = Some(format!("? {error}"));
@@ -507,6 +527,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                                 &name,
                                 &mut width,
                                 &mut height,
+                                InputStart::Change { motion, count },
                             )?,
                             Err(error) => command.message = Some(format!("? {error}")),
                         }
@@ -702,6 +723,36 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn repeat_prefix_counts_cancel_and_do_not_complete_an_operator() {
+        let mut prefix = NormalPrefix::default();
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        assert_eq!(prefix.key(key('.')), Ok(PrefixAction::Repeat(None)));
+        for c in "12".chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        assert_eq!(prefix.key(key('.')), Ok(PrefixAction::Repeat(Some(12))));
+        assert_eq!(prefix.key(key('.')), Ok(PrefixAction::Repeat(None)));
+        for cancel in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            prefix.key(key('9')).unwrap();
+            prefix.key(cancel).unwrap();
+            assert_eq!(prefix.key(key('.')), Ok(PrefixAction::Repeat(None)));
+        }
+        for op in ['d', 'c', 'y'] {
+            prefix.key(key(op)).unwrap();
+            assert!(prefix.key(key('.')).is_err());
+            assert_eq!(prefix.key(key('.')), Ok(PrefixAction::Repeat(None)));
+        }
+        for c in usize::MAX.to_string().chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        assert!(prefix.key(key('0')).is_err());
+        assert_eq!(prefix.key(key('.')), Ok(PrefixAction::Repeat(None)));
     }
 
     #[test]

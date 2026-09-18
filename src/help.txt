@@ -137,6 +137,19 @@ Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys
 are ignored during Insert. Normal x deletes a character; u (or :u)
 undoes/restores the last edit, including a whole Insert session.
+. repeats the last successful visual text edit at the current cursor.
+It covers Insert/change/Replace sessions, d/dd/D/x, r, J and p/P. 3.
+replaces the saved count, rather than multiplying it; a successful counted
+repeat keeps that count for the next dot. For changes it replaces the
+selection count and types the input once; for Insert/Replace it repeats
+input, opening a fresh line for each o/O repetition. Each dot is one undo.
+Movement, search, yank, undo, saving and ex commands do not replace the
+visual repeat record; file switches preserve it. Put repeats use the current
+unnamed register. Failed, cancelled or net-unchanged edits preserve the
+record. Replay errors leave text, registers, cursor and undo unchanged.
+Input replay expansion is limited to 1,000,000 work units (inserted bytes
+plus logical input actions and one overhead unit per repetition); larger
+counts fail before editing. No terminal escape sequences are replayed.
 Type : to enter w [path], q, q!, wq [path], e[!] [path], f [path],
 d, u, or s/pattern/replacement/[g]; addresses and ranges follow ex semantics.
 Successful edits/loads move to the resulting ex line at column 1.
@@ -152,7 +165,7 @@ as caret notation; zero-width characters show a replacement glyph.
 Movement uses Unicode scalars, not grapheme clusters; complex emoji and
 combining sequences are not fully supported. The last terminal column is
 reserved to avoid autowrap. Browsing and searching never change text;
-:w/:wq write files. Multiline :a/:i/:c, general counts, dot-repeat, autoindent
+:w/:wq write files. Multiline :a/:i/:c, general counts, autoindent
 and bracketed paste are not implemented. Terminal I/O errors retain the
 current Insert draft in memory before returning; no recovery file or
 automatic save is provided.

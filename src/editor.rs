@@ -5,7 +5,7 @@ mod register;
 mod text_edit;
 pub use register::Register;
 use std::path::{Path, PathBuf};
-pub use text_edit::TextEdit;
+pub use text_edit::{InputAction, TextEdit};
 
 use crate::buffer::TextBuffer;
 use crate::ex::address::{AddressError, LineRange};

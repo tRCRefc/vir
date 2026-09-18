@@ -3,6 +3,8 @@ mod command;
 mod insert;
 mod motion;
 mod operator;
+mod repeat;
+pub use repeat::InputStart;
 mod search;
 mod terminal;
 use crate::buffer::TextBuffer;
@@ -50,11 +52,15 @@ impl VisualState {
         self.preferred_column = 0;
         self.left = 0;
         self.top = self.top.min(self.row);
+        self.last_change = Some(repeat::ChangeRecord::Delete {
+            motion: None,
+            count: Some(count.max(1)),
+        });
         Ok(())
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct VisualState {
     pub row: usize,
     /// Unicode scalar index, not a byte or terminal column.
@@ -63,6 +69,7 @@ pub struct VisualState {
     pub left: usize,
     preferred_column: usize,
     search_forward: Option<bool>,
+    last_change: Option<repeat::ChangeRecord>,
 }
 
 #[derive(Debug)]
