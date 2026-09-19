@@ -246,6 +246,16 @@ def quoted_r(session):
     session.save_exit(b"Z\x03cdef\n")
 
 
+def backspace_at_limit(session):
+    for mode in [b"i", b"R"]:
+        session.send(b"500000" + mode + b"\r", b"2/2  col 1")
+        session.send(b"\x7f", b"1/1  col 1")
+        session.send(b"\x1b", b"[VIEW]")
+        session.send(b":w\r", b"Written")
+        assert session.path.read_bytes() == b"abcdef\n"
+    session.save_exit(b"abcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -263,7 +273,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")

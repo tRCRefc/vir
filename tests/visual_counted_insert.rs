@@ -159,3 +159,74 @@ fn empty_cancelled_and_pasted_sessions_use_one_transaction() {
     editor.undo().unwrap();
     assert_eq!(editor.buffer().to_text(), "");
 }
+
+#[test]
+fn backspace_after_first_newline_remains_available_at_counted_budget_limit() {
+    for mode in ['i', 'R'] {
+        let mut editor = editor("abc");
+        let mut state = VisualState::default();
+        let mut input = state
+            .begin_counted_insert(&mut editor, mode, 333_333)
+            .unwrap();
+        input.paste("X\n").unwrap();
+        assert_eq!(input.buffer().line_count(), 2);
+        let erase = if mode == 'R' {
+            InputAction::RestoreReplacement
+        } else {
+            InputAction::Backspace
+        };
+        input.apply_input(&erase).unwrap();
+        assert_eq!(input.buffer().line_count(), 1);
+        input.apply_input(&erase).unwrap();
+        input.commit(&mut state).unwrap();
+        let expected = format!(
+            "{}{}",
+            "X".repeat(333_332),
+            if mode == 'R' { "bc" } else { "abc" }
+        );
+        assert_eq!(editor.buffer().to_text(), expected);
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "abc");
+        state.row = 0;
+        state.column = 0;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(editor.buffer().to_text(), expected);
+    }
+}
+
+#[test]
+fn original_text_and_cross_line_backspace_remain_explicit_extensions() {
+    let mut editor = editor("ab\ncd");
+    let mut state = VisualState::default();
+    state.row = 1;
+    let mut input = state.begin_counted_insert(&mut editor, 'i', 3).unwrap();
+    input.apply_input(&InputAction::Backspace).unwrap(); // join original lines
+    input.apply_input(&InputAction::Backspace).unwrap(); // erase original b
+    input.paste("X").unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "aXXXcd");
+    editor.undo().unwrap();
+    assert_eq!(editor.buffer().to_text(), "ab\ncd");
+    state.row = 1;
+    state.column = 0;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "aXXXcd");
+}
+
+#[test]
+fn no_op_replace_backspace_at_maximum_count_preserves_previous_change() {
+    let mut editor = editor("abc");
+    let mut state = VisualState::default();
+    state.replace_character(&mut editor, 'Z').unwrap();
+    let before = editor.clone();
+    state.column = 1;
+    let mut input = state
+        .begin_counted_insert(&mut editor, 'R', 1_000_000)
+        .unwrap();
+    input.apply_input(&InputAction::RestoreReplacement).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor, before);
+    state.column = 1;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "ZZc");
+}

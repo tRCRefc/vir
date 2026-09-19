@@ -6,16 +6,28 @@ use crate::{
 };
 
 pub(super) const MAX_INPUT_WORK: usize = 1_000_000;
+// Corrections do not expand text, but their saved recipe must still be bounded.
+const MAX_INPUT_ACTIONS: usize = 1_000_000;
+
+fn check_action_count(count: usize) -> Result<(), String> {
+    if count > MAX_INPUT_ACTIONS {
+        Err("too many input actions".into())
+    } else {
+        Ok(())
+    }
+}
 
 pub(super) fn action_work(action: &InputAction) -> usize {
     match action {
         InputAction::Insert(text) | InputAction::ReplaceText(text) => text.len().max(1),
         InputAction::Replace(c) => c.len_utf8(),
+        InputAction::Backspace | InputAction::RestoreReplacement => 0,
         _ => 1,
     }
 }
 
 pub(super) fn validate_work(actions: &[InputAction], count: usize) -> Result<(), String> {
+    check_action_count(actions.len())?;
     let work = actions.iter().try_fold(1usize, |total, action| {
         total.checked_add(action_work(action))
     });
@@ -127,6 +139,10 @@ impl<'a> InputSession<'a> {
         {
             return Ok(());
         }
+        if matches!(action, InputAction::RestoreReplacement) && !self.edit.can_restore_replacement()
+        {
+            return Ok(());
+        }
         let position = self.edit.cursor();
         if matches!(action, InputAction::Backspace) && position == Position::default() {
             return Ok(());
@@ -169,6 +185,17 @@ impl<'a> InputSession<'a> {
         // Counted input is bounded before accepting each key/paste, not on Esc.
         if self.repetitions > 1 {
             check_work(work, self.repetitions)?;
+            let merges = matches!(
+                (self.actions.last(), action),
+                (Some(InputAction::Insert(_)), InputAction::Insert(_))
+                    | (
+                        Some(InputAction::ReplaceText(_)),
+                        InputAction::ReplaceText(_)
+                    )
+            );
+            check_action_count(
+                self.actions.len() + usize::from(erase_insert.is_none() && !merges),
+            )?;
         }
         if self.remaining > 1 {
             match action {
@@ -279,6 +306,18 @@ impl InputTarget for InputSession<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_expansion_corrections_still_have_a_bounded_replay_recipe() {
+        let mut actions = vec![InputAction::Backspace; MAX_INPUT_ACTIONS];
+        assert!(validate_work(&actions, MAX_INPUT_WORK).is_ok());
+        actions.push(InputAction::RestoreReplacement);
+        assert_eq!(
+            validate_work(&actions, 1),
+            Err("too many input actions".into())
+        );
+        assert!(validate_work(&[InputAction::Insert("x".into())], MAX_INPUT_WORK).is_err());
+    }
 
     #[test]
     fn interrupted_replace_keeps_only_completed_copies() {

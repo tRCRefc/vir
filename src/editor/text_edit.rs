@@ -182,6 +182,10 @@ impl TextEdit<'_> {
         Ok(())
     }
 
+    pub(crate) fn can_restore_replacement(&self) -> bool {
+        !self.replacements.is_empty()
+    }
+
     /// Reverse the most recent Replace keystroke, stopping at session entry.
     pub fn replace_backspace(&mut self) -> Result<(), String> {
         if let Some((start, end, old, was_empty)) = self.replacements.last() {
