@@ -124,7 +124,8 @@ impl VisualState {
         self.replace_counted(editor, replacement, 1)
     }
 
-    pub(super) fn replace_counted(
+    /// Replace a counted range on the current line in one undo transaction.
+    pub fn replace_counted(
         &mut self,
         editor: &mut Editor,
         replacement: char,
@@ -133,13 +134,8 @@ impl VisualState {
         if replacement == '\n' || replacement == '\r' || replacement.is_control() {
             return Err("replacement must be a printable character".into());
         }
-        let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
         let count = count.max(1);
-        let end = self
-            .column
-            .checked_add(count)
-            .filter(|end| *end <= length)
-            .ok_or("not enough characters to replace")?;
+        let end = self.replacement_end(editor, count)?;
         let changed = editor
             .buffer()
             .line(self.row)
@@ -174,5 +170,13 @@ impl VisualState {
             count,
         });
         Ok(())
+    }
+    // Historical vrep checks the range before reading the replacement key.
+    pub(super) fn replacement_end(&self, editor: &Editor, count: usize) -> Result<usize, String> {
+        let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
+        self.column
+            .checked_add(count.max(1))
+            .filter(|end| *end <= length)
+            .ok_or_else(|| "not enough characters to replace".into())
     }
 }

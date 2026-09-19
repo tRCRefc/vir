@@ -142,6 +142,7 @@ enum PrefixAction {
     Pass,
     Pending,
     Join(usize),
+    Replace(usize),
     Move(Motion, usize),
     Repeat(Option<usize>),
     Operate(Operator, Option<Motion>, Option<usize>),
@@ -221,6 +222,11 @@ impl NormalPrefix {
                 ));
             }
             return Err("unsupported operator motion; command cancelled");
+        }
+        if key.code == KeyCode::Char('r') {
+            let count = self.digits.max(1);
+            *self = Self::default();
+            return Ok(PrefixAction::Replace(count));
         }
         if key.code == KeyCode::Char('.') {
             let count = (self.digits != 0).then_some(self.digits);
@@ -466,7 +472,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
     let mut prefix = NormalPrefix::default();
-    let mut replace_pending = false;
+    let mut replace_pending = None;
     let (mut width, mut height) = terminal::size()?;
     loop {
         if let Err(error) = recovery.observe(editor) {
@@ -534,10 +540,11 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 if command.input.is_some() {
                     command.paste(&text);
                 } else {
-                    let pending =
-                        replace_pending || prefix.digits != 0 || prefix.operator_count.is_some();
+                    let pending = replace_pending.is_some()
+                        || prefix.digits != 0
+                        || prefix.operator_count.is_some();
                     prefix = NormalPrefix::default();
-                    replace_pending = false;
+                    replace_pending = None;
                     command.message = if pending {
                         Some("? paste cancelled pending command; nothing pasted".into())
                     } else {
@@ -568,8 +575,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
-                if replace_pending {
-                    replace_pending = false;
+                if let Some(count) = replace_pending.take() {
                     if key.code == KeyCode::Esc
                         || key
                             .modifiers
@@ -578,7 +584,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     if let KeyCode::Char(character) = key.code {
-                        if let Err(error) = state.replace_character(editor, character) {
+                        if let Err(error) = state.replace_counted(editor, character, count) {
                             command.message = Some(format!("? {error}"));
                         }
                     } else {
@@ -588,6 +594,13 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 }
                 match prefix.key(key) {
                     Ok(PrefixAction::Pending) => continue,
+                    Ok(PrefixAction::Replace(count)) => {
+                        match state.replacement_end(editor, count) {
+                            Ok(_) => replace_pending = Some(count),
+                            Err(error) => command.message = Some(format!("? {error}")),
+                        }
+                        continue;
+                    }
                     Ok(PrefixAction::Repeat(count)) => {
                         if let Err(error) = state.repeat_change(editor, count) {
                             command.message = Some(format!("? {error}"));
@@ -687,10 +700,6 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         }
                         continue;
                     }
-                    if key.code == KeyCode::Char('r') {
-                        replace_pending = true;
-                        continue;
-                    }
                 }
 
                 if key.code == KeyCode::Char(':') {
@@ -732,6 +741,36 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_prefix_preserves_count_and_rejects_operator_combinations() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        for (sequence, count) in [("r", 1), ("1r", 1), ("3r", 3), ("10r", 10)] {
+            for c in sequence[..sequence.len() - 1].chars() {
+                assert_eq!(prefix.key(key(c)), Ok(PrefixAction::Pending));
+            }
+            assert_eq!(prefix.key(key('r')), Ok(PrefixAction::Replace(count)));
+            assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
+        }
+        for operator in ['d', 'c', 'y'] {
+            prefix.key(key('2')).unwrap();
+            prefix.key(key(operator)).unwrap();
+            assert!(prefix.key(key('r')).is_err());
+            assert_eq!(prefix.key(key('r')), Ok(PrefixAction::Replace(1)));
+        }
+        for c in usize::MAX.to_string().chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        assert!(prefix.key(key('0')).is_err());
+        assert_eq!(prefix.key(key('r')), Ok(PrefixAction::Replace(1)));
+        let mut editor = Editor::default();
+        let state = VisualState::default();
+        assert!(state.replacement_end(&editor, 1).is_err());
+        editor.insert_lines(0, ["中ab"]).unwrap();
+        assert_eq!(state.replacement_end(&editor, 3).unwrap(), 3);
+        assert!(state.replacement_end(&editor, 4).is_err());
+    }
 
     #[test]
     fn command_paste_is_literal_single_line_and_requires_enter() {
@@ -984,7 +1023,7 @@ mod tests {
             assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
         }
         for sequence in [
-            "3i", "dq", "dg", "9x", "dJ", "2C", "3D", "2r", "cd", "dc", "cq", "yd", "cy", "yp",
+            "3i", "dq", "dg", "9x", "dJ", "2C", "3D", "dr", "cd", "dc", "cq", "yd", "cy", "yp",
         ] {
             for c in sequence[..sequence.len() - 1].chars() {
                 prefix.key(key(c)).unwrap();

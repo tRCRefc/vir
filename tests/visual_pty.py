@@ -729,7 +729,69 @@ def conflict_session(directory):
         os.close(slave)
 
 
+def counted_replace_session(directory):
+    path = directory / "counted-replace"
+    path.write_text("abcdefghij\n中文测试abcd\nshort")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 150, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    def send(keys, marker):
+        os.write(master, keys)
+        receive(master, marker)
+    try:
+        receive(master, b"1/3  col 1")
+        send(b"3rX", b"XXXdefghij")
+        send(b"u", b"abcdefghij")
+        send(b"u", b"XXXdefghij")
+        send(b"g0l", b"col 2")
+        # Failure is reported on r, before any replacement key is supplied.
+        send(b"99r", b"not enough characters to replace")
+        send(b"l", b"col 3")
+        send(b"3r\x1b", b"[VIEW]")
+        send(b"l", b"col 4")
+        send(b"3r\x03", b"[VIEW]")
+        send(b"l", b"col 5")
+        send(b"2r\r", b"replacement requires one character")
+        send(b"l", b"col 6")
+        # Overflow clears the prefix; subsequent r is uncounted.
+        maximum = (1 << (struct.calcsize("P") * 8)) - 1
+        send(str(maximum).encode() + b"0", b"count too large")
+        send(b"rZ", b"XXXdeZghij")
+        send(b"j0", b"2/3  col 1")
+        send(b"3r", b"[VIEW]")
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[6;1H[VIEW]")
+        send("字".encode(), "字字字试abcd".encode())
+        send(b"u", "中文测试abcd".encode())
+        send(b"u", "字字字试abcd".encode())
+        send(b"g0", b"1/3  col 1")
+        send(b"3r0", b"000deZghij")
+        send(b"l.", b"000000ghij")
+        send(b"l2.", b"00000000ij")
+        send(b"l.", b"0000000000")
+        send(b"l.", b"not enough characters to replace")
+        send(b":w\r", b"Written")
+        expected = "0000000000\n字字字试abcd\nshort"
+        assert path.read_text() == expected
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        data = receive(master, b"\x1b[?1049l")
+        assert b"\x1b[?2004l" in data
+        assert path.read_text() == expected
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    counted_replace_session(Path(directory))
     conflict_session(Path(directory))
     repeat_session(Path(directory))
     word_operator_session(Path(directory))

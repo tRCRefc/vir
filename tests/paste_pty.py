@@ -102,7 +102,7 @@ def normal(session):
 
 
 def pending_and_command(session):
-    for pending in [b"d", b"r", b"2", b"c"]:
+    for pending in [b"d", b"r", b"3r", b"2", b"c"]:
         session.send(pending)
         session.paste(b":q!\n", b"paste cancelled pending command")
         session.send(b":w\r", b"Written")
