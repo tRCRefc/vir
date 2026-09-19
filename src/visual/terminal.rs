@@ -523,7 +523,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     if key.code == KeyCode::Char('u') {
-                        command.execute("u", editor, &mut state);
+                        if let Err(error) = state.undo(editor) {
+                            command.message = Some(format!("? {error}"));
+                        }
                         continue;
                     }
                     if key.code == KeyCode::Char('x') {

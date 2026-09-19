@@ -24,6 +24,7 @@ pub struct Editor {
     warned_remaining: Option<usize>,
     last_search: Option<String>,
     undo: Option<(TextBuffer, Option<usize>)>,
+    undo_position: Option<crate::buffer::Position>,
 }
 
 impl Editor {
@@ -122,9 +123,15 @@ impl Editor {
         let current = apply(&mut buffer).map_err(str::to_owned)?;
         let previous = std::mem::replace(&mut self.buffer, buffer);
         self.undo = Some((previous, self.current));
+        self.undo_position = None;
         self.current = current;
         self.modified = true;
         Ok(())
+    }
+
+    /// Optional scalar edit anchor associated with the current undo pair.
+    pub(crate) fn undo_position(&self) -> Option<crate::buffer::Position> {
+        self.undo_position
     }
 
     /// Original ex undo is its own inverse; it is a change even if it restores

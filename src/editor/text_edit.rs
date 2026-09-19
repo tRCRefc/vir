@@ -17,6 +17,8 @@ pub struct TextEdit<'a> {
     editor: &'a mut Editor,
     draft: TextBuffer,
     cursor: Position,
+    undo_anchor: Position,
+    crossed_lines: bool,
     pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
@@ -31,6 +33,8 @@ impl Editor {
             draft: self.buffer.clone(),
             editor: self,
             cursor,
+            undo_anchor: cursor,
+            crossed_lines: false,
             replacements: Vec::new(),
             pending_register: None,
             input_actions: None,
@@ -106,6 +110,7 @@ impl TextEdit<'_> {
             old.map_or_else(String::new, |c| c.to_string()),
             was_empty,
         ));
+        self.crossed_lines |= character == '\n';
         self.record(InputAction::Replace(character));
         Ok(())
     }
@@ -175,6 +180,7 @@ impl TextEdit<'_> {
                 text,
             )
             .map_err(str::to_owned)?;
+        self.crossed_lines |= text.contains('\n');
         self.replacements.extend(history);
         if self.input_actions.is_some() {
             self.record(InputAction::ReplaceText(text.to_owned()));
@@ -215,6 +221,8 @@ impl TextEdit<'_> {
             .draft
             .replace_text(start, end, "")
             .map_err(str::to_owned)?;
+        self.undo_anchor = self.undo_anchor.min(start);
+        self.crossed_lines |= start.row != end.row;
         self.replacements.clear();
         Ok(())
     }
@@ -229,6 +237,7 @@ impl TextEdit<'_> {
             self.cursor.row + 1
         };
         self.draft.insert_lines(row, [""]).map_err(str::to_owned)?;
+        self.crossed_lines = true;
         self.cursor = Position { row, column: 0 };
         Ok(())
     }
@@ -240,6 +249,7 @@ impl TextEdit<'_> {
             self.cursor.row
         };
         self.draft.insert_lines(row, [""]).map_err(str::to_owned)?;
+        self.crossed_lines = true;
         self.cursor = Position { row, column: 0 };
         Ok(())
     }
@@ -249,6 +259,7 @@ impl TextEdit<'_> {
             .draft
             .replace_text(self.cursor, self.cursor, text)
             .map_err(str::to_owned)?;
+        self.crossed_lines |= text.contains('\n');
         if !text.is_empty() && self.input_actions.is_some() {
             self.record(InputAction::Insert(text.to_owned()));
         }
@@ -278,6 +289,8 @@ impl TextEdit<'_> {
             .draft
             .replace_text(start, self.cursor, "")
             .map_err(str::to_owned)?;
+        self.crossed_lines |= start.row != self.undo_anchor.row;
+        self.undo_anchor = self.undo_anchor.min(start);
         self.record(InputAction::Backspace);
         Ok(())
     }
@@ -305,6 +318,7 @@ impl TextEdit<'_> {
         self.draft
             .replace_text(self.cursor, end, "")
             .map_err(str::to_owned)?;
+        self.crossed_lines |= self.cursor.row != end.row;
         self.record(InputAction::Delete);
         Ok(())
     }
@@ -370,6 +384,7 @@ impl TextEdit<'_> {
                 &joined,
             )
             .map_err(str::to_owned)?;
+        self.crossed_lines = true;
         self.cursor = Position {
             row,
             column: column.min(joined.chars().count().saturating_sub(1)),
@@ -381,10 +396,18 @@ impl TextEdit<'_> {
         let pending_register = self.pending_register;
         if self.draft != self.editor.buffer {
             let row = self.cursor.row;
+            let original = &self.editor.buffer;
+            let single_line = !self.crossed_lines
+                && self.draft.line_count() == original.line_count()
+                && self.draft.has_trailing_newline() == original.has_trailing_newline()
+                && (0..original.line_count())
+                    .all(|r| r == self.undo_anchor.row || self.draft.line(r) == original.line(r));
+            let anchor = single_line.then_some(self.undo_anchor);
             self.editor.edit(move |buffer| {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
+            self.editor.undo_position = anchor;
         }
         if let Some(register) = pending_register {
             self.editor.unnamed = Some(register);

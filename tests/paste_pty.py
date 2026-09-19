@@ -281,6 +281,21 @@ def line_undo(session):
     session.save_exit(b"aYcdef\nsecond\n")
 
 
+def undo_cursor(session):
+    session.send(b"llrX", b"abXdef")
+    session.send(b"$u", b"col 3")
+    session.send(b"u", b"abXdef")
+    session.send(b":w\r", b"Written")
+    session.send(b"0u", b"col 3")
+    session.send(b"aZ", b"abcZdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"0u", b"col 4")
+    session.send(b"2dh", b"adef")
+    session.send(b"$u", b"col 2")
+    session.send(b"U", b"no line changes to restore")
+    session.save_exit(b"abcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -298,7 +313,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"abcdef\n")

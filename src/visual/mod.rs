@@ -14,6 +14,7 @@ mod repeat;
 pub use repeat::InputStart;
 mod search;
 mod terminal;
+mod undo;
 use crate::buffer::TextBuffer;
 pub use terminal::run;
 use unicode_width::UnicodeWidthChar;
