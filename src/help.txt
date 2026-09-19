@@ -140,7 +140,9 @@ Normal R enters [REPLACE]: each Unicode scalar overwrites one character,
 then appends at line end. Tab replaces one scalar; Enter splits the line.
 Backspace restores the previous Replace keystroke, including a split or
 append, and stops at session entry. Esc/Ctrl-C commits one undo for the
-whole session. Arrow keys and Delete are ignored; R counts are unsupported.
+whole session. Arrow keys and Delete are ignored. [count]R overwrites one
+copy of the net first segment, then inserts extra copies (historical vi):
+3RXY on abcdef yields XYXYXYcdef. The first Enter consumes the count.
 Normal [count]i/a/I/A repeats the net first input segment. The first Enter
 consumes the count; later lines are inserted once (historical vi behavior).
 3iX<Enter>Y<Esc> inserts XXX then a newline and Y. Counted input is bounded
@@ -158,7 +160,7 @@ replaces the saved count, rather than multiplying it; a successful counted
 repeat keeps that count for the next dot. For changes it replaces the
 selection count and types the input once. i/a/I/A repeat only the first
 input segment; o/O open and type once even with n. (historical vi). R
-currently repeats all input. Each dot is one undo.
+overwrites once and inserts extra first-segment copies. Each dot is one undo.
 Movement, search, yank, undo, saving and ex commands do not replace the
 visual repeat record; file switches preserve it. Put repeats use the current
 unnamed register. Failed, cancelled or net-unchanged edits preserve the

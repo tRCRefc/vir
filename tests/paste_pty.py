@@ -151,6 +151,32 @@ def counted_open(session):
     session.save_exit("abcdef\n字\nQ\n\nQ\nY\n".encode())
 
 
+def counted_replace(session):
+    session.send(b"3RXY", b"XYcdef")
+    fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+    receive(session.master, b"\x1b[6;1H[REPLACE]")
+    session.send(b"\x03", b"XYXYXYcdef")
+    session.send(b"u", b"abcdef")
+    session.send(b"0", b"col 1")
+    session.send(b"2.", b"XYXYcdef")
+    session.send(b"u", b"abcdef")
+    session.send(b"0", b"col 1")
+    session.send(b"3R", b"[REPLACE]")
+    session.paste(b"X\r\nY", b"Ycdef")
+    session.send(b"\x7f\x7f\x7f", b"XXbcdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_text() == "XXbcdef\n"
+    session.send(b"u", b"abcdef")
+    session.send(b"0", b"col 1")
+    session.send(b"250000R", b"[REPLACE]")
+    session.send("字".encode(), "字bcdef".encode())
+    session.send(b"X", b"input repeat too large")
+    session.send(b"\x7f", b"abcdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.save_exit(b"abcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -168,7 +194,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")

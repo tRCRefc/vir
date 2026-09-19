@@ -113,6 +113,15 @@ impl TextEdit<'_> {
     /// Replace literal text in one buffer operation, retaining per-scalar R
     /// backspace history. LF splits the current line; it never consumes a file LF.
     pub fn replace_input_text(&mut self, text: &str) -> Result<(), String> {
+        self.write_replace_text(text, true)
+    }
+
+    /// Insert generated R copies while retaining reversible per-scalar history.
+    pub(crate) fn insert_replace_copies(&mut self, text: &str) -> Result<(), String> {
+        self.write_replace_text(text, false)
+    }
+
+    fn write_replace_text(&mut self, text: &str, overwrite: bool) -> Result<(), String> {
         if text.contains('\r') {
             return Err("carriage returns are not supported".into());
         }
@@ -130,7 +139,11 @@ impl TextEdit<'_> {
         let mut overwritten = 0;
         let mut history = Vec::new();
         for (index, character) in text.chars().enumerate() {
-            let previous = if character == '\n' { None } else { old.next() };
+            let previous = if character == '\n' || !overwrite {
+                None
+            } else {
+                old.next()
+            };
             overwritten += usize::from(previous.is_some());
             let next = if character == '\n' {
                 Position {

@@ -100,7 +100,7 @@ impl NormalPrefix {
             }
             return Err("unsupported operator motion; command cancelled");
         }
-        if let KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O')) = key.code {
+        if let KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R')) = key.code {
             let count = self.digits.max(1);
             *self = Self::default();
             if InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
@@ -200,18 +200,16 @@ mod tests {
     fn counted_input_prefix_is_bounded_and_cancellation_clears_state() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let mut prefix = NormalPrefix::default();
-        for mode in ['i', 'a', 'I', 'A', 'o', 'O'] {
+        for mode in ['i', 'a', 'I', 'A', 'o', 'O', 'R'] {
             prefix.key(key('3')).unwrap();
             assert!(prefix.is_pending());
             assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 3)));
             assert!(!prefix.is_pending());
             assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 1)));
         }
-        for mode in ['R', 'C'] {
-            prefix.key(key('2')).unwrap();
-            assert!(prefix.key(key(mode)).is_err());
-            assert_eq!(prefix.key(key('i')), Ok(PrefixAction::Insert('i', 1)));
-        }
+        prefix.key(key('2')).unwrap();
+        assert!(prefix.key(key('C')).is_err());
+        assert_eq!(prefix.key(key('i')), Ok(PrefixAction::Insert('i', 1)));
         for c in "1000001".chars() {
             prefix.key(key(c)).unwrap();
         }
@@ -454,7 +452,7 @@ mod tests {
             assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
         }
         for sequence in [
-            "3R", "dq", "dg", "9x", "dJ", "2C", "3D", "dr", "cd", "dc", "cq", "yd", "cy", "yp",
+            "3C", "dq", "dg", "9x", "dJ", "2C", "3D", "dr", "cd", "dc", "cq", "yd", "cy", "yp",
         ] {
             for c in sequence[..sequence.len() - 1].chars() {
                 prefix.key(key(c)).unwrap();

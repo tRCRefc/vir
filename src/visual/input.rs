@@ -10,6 +10,7 @@ pub(super) const MAX_INPUT_WORK: usize = 1_000_000;
 pub(super) fn action_work(action: &InputAction) -> usize {
     match action {
         InputAction::Insert(text) | InputAction::ReplaceText(text) => text.len().max(1),
+        InputAction::Replace(c) => c.len_utf8(),
         _ => 1,
     }
 }
@@ -77,8 +78,8 @@ impl<'a> InputSession<'a> {
         count: usize,
     ) -> Result<Self, String> {
         let count = start.input_count(count);
-        if count > 1 && !matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A')) {
-            return Err("counted input is supported only for i/a/I/A".into());
+        if count > 1 && !matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A' | 'R')) {
+            return Err("counted input is supported only for i/a/I/A/R".into());
         }
         check_work(Some(1), count)?;
         edit.take_input_actions();
@@ -113,6 +114,15 @@ impl<'a> InputSession<'a> {
     }
 
     pub fn apply_input(&mut self, action: &InputAction) -> Result<(), String> {
+        if let InputAction::Replace(c) = action {
+            if c.is_control() && *c != '\n' && *c != '\t' {
+                return Err("unsupported replacement character".into());
+            }
+            return self.apply_input(&InputAction::ReplaceText(c.to_string()));
+        }
+        if matches!(action, InputAction::ReplaceText(text) if text.contains('\r')) {
+            return Err("carriage returns are not supported".into());
+        }
         if matches!(action, InputAction::Insert(text) | InputAction::ReplaceText(text) if text.is_empty())
         {
             return Ok(());
@@ -136,9 +146,16 @@ impl<'a> InputSession<'a> {
         }
         // Erasing freshly typed text before the first LF reduces the recipe as
         // well as its expansion cost, so reaching the limit never traps Backspace.
-        let erase_insert = if self.remaining > 1 && matches!(action, InputAction::Backspace) {
+        let erase_insert = if self.remaining > 1 {
             match self.actions.last() {
-                Some(InputAction::Insert(text)) => text.chars().last().map(char::len_utf8),
+                Some(InputAction::Insert(text)) if matches!(action, InputAction::Backspace) => {
+                    text.chars().last().map(char::len_utf8)
+                }
+                Some(InputAction::ReplaceText(text))
+                    if matches!(action, InputAction::RestoreReplacement) =>
+                {
+                    text.chars().last().map(char::len_utf8)
+                }
                 _ => None,
             }
         } else {
@@ -167,6 +184,26 @@ impl<'a> InputSession<'a> {
                         self.prefix.push_str(text);
                     }
                 }
+                InputAction::ReplaceText(text) => {
+                    if let Some((head, tail)) = text.split_once('\n') {
+                        let unit = format!("{}{head}", self.prefix);
+                        self.edit.replace_input_text(head)?;
+                        self.edit
+                            .insert_replace_copies(&unit.repeat(self.remaining - 1))?;
+                        self.edit.replace_input_text(&format!("\n{tail}"))?;
+                        self.prefix.clear();
+                        self.remaining = 1;
+                    } else {
+                        self.edit.replace_input_text(text)?;
+                        self.prefix.push_str(text);
+                    }
+                }
+                InputAction::RestoreReplacement => {
+                    self.edit.replace_backspace()?;
+                    if self.edit.cursor() != position {
+                        self.prefix.pop();
+                    }
+                }
                 InputAction::Backspace => {
                     self.edit.backspace()?;
                     self.prefix.pop();
@@ -181,7 +218,9 @@ impl<'a> InputSession<'a> {
         }
         self.work = work.unwrap_or(usize::MAX);
         if erase_insert.is_some() {
-            if let Some(InputAction::Insert(previous)) = self.actions.last_mut() {
+            if let Some(InputAction::Insert(previous) | InputAction::ReplaceText(previous)) =
+                self.actions.last_mut()
+            {
                 previous.pop();
                 if previous.is_empty() {
                     self.actions.pop();
@@ -189,12 +228,12 @@ impl<'a> InputSession<'a> {
             }
             return Ok(());
         }
-        if let (Some(InputAction::Insert(previous)), InputAction::Insert(text)) =
-            (self.actions.last_mut(), action)
-        {
-            previous.push_str(text);
-        } else {
-            self.actions.push(action.clone());
+        match (self.actions.last_mut(), action) {
+            (Some(InputAction::Insert(previous)), InputAction::Insert(text))
+            | (Some(InputAction::ReplaceText(previous)), InputAction::ReplaceText(text)) => {
+                previous.push_str(text)
+            }
+            _ => self.actions.push(action.clone()),
         }
         Ok(())
     }
@@ -240,6 +279,20 @@ impl InputTarget for InputSession<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_replace_keeps_only_completed_copies() {
+        for (text, expected) in [("X", "Xbcdef"), ("X\nY", "XXX\nYcdef")] {
+            let mut editor = Editor::from_buffer(TextBuffer::from_text("abcdef").unwrap());
+            let mut state = VisualState::default();
+            let mut input = state.begin_counted_insert(&mut editor, 'R', 3).unwrap();
+            input.paste(text).unwrap();
+            input.interrupt(&mut state).unwrap();
+            assert_eq!(editor.buffer().to_text(), expected);
+            editor.undo().unwrap();
+            assert_eq!(editor.buffer().to_text(), "abcdef");
+        }
+    }
 
     #[test]
     fn replace_noop_backspace_does_not_rewind_dot_at_another_position() {

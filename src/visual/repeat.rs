@@ -109,24 +109,14 @@ impl ChangeRecord {
                 repetitions,
             } => {
                 validate_work(actions, *repetitions)?;
-                let mut edit = start.begin(state, editor)?;
-                // Replay uses this descriptor again, not a recording of its
-                // expanded actions (which would multiply the next dot twice).
-                edit.take_input_actions();
-                if matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A' | 'o' | 'O')) {
-                    let mut session = InputSession::new(edit, start.clone(), *repetitions)?;
-                    for action in actions {
-                        session.apply_input(action)?;
-                    }
-                    return session.commit(state);
+                let edit = start.begin(state, editor)?;
+                // Live input and replay share one transaction controller. Its
+                // recipe stays unexpanded; the caller publishes the effective count.
+                let mut session = InputSession::new(edit, start.clone(), *repetitions)?;
+                for action in actions {
+                    session.apply_input(action)?;
                 }
-                for _ in 0..*repetitions {
-                    for action in actions {
-                        edit.apply_input(action)?;
-                    }
-                }
-                state.finish_insert(edit.commit()?);
-                Ok(())
+                session.commit(state)
             }
         }
     }

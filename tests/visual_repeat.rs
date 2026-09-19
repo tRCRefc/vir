@@ -174,7 +174,7 @@ fn replace_mode_replays_restoration_and_counted_replacement() {
     state.row = 1;
     state.column = 0;
     state.repeat_change(&mut editor, Some(2)).unwrap();
-    assert_eq!(editor.buffer().to_text(), "中!cdef\n中!中!kl");
+    assert_eq!(editor.buffer().to_text(), "中!cdef\n中!中!ijkl");
     editor.undo().unwrap();
     assert_eq!(editor.buffer().to_text(), "中!cdef\nghijkl");
     state.column = 0;
