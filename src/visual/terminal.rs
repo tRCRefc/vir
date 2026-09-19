@@ -1,9 +1,13 @@
 use super::operator::Operator;
+use super::paste::{normalize, paste_input};
 use super::{InputStart, Motion, VisualState, clip, screen_column};
 use crate::{editor::Editor, recovery::Recovery};
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers,
+    },
     execute, queue,
     style::Print,
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
@@ -15,14 +19,24 @@ impl TerminalGuard {
     fn enter() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
         let guard = Self;
-        execute!(io::stdout(), EnterAlternateScreen, cursor::Hide)?;
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            cursor::Hide
+        )?;
         Ok(guard)
     }
 }
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         // Also runs when a read/write error or unwinding panic leaves the loop.
-        let _ = execute!(io::stdout(), cursor::Show, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            cursor::Show,
+            LeaveAlternateScreen
+        );
         let _ = terminal::disable_raw_mode();
     }
 }
@@ -32,6 +46,7 @@ struct CommandLine {
     input: Option<String>,
     message: Option<String>,
     search_direction: Option<bool>,
+    input_error: Option<String>,
 }
 
 impl CommandLine {
@@ -55,6 +70,7 @@ impl CommandLine {
 
     // Called only while command input is active; editing keys never move the file cursor.
     fn key(&mut self, key: KeyEvent) {
+        self.input_error = None;
         let input = self.input.as_mut().unwrap();
         match key.code {
             KeyCode::Esc => self.input = None,
@@ -79,8 +95,22 @@ impl CommandLine {
         }
     }
 
+    fn paste(&mut self, text: &str) {
+        let result = normalize(text).and_then(|text| {
+            if text.chars().any(|c| c.is_control() && c != '\t') {
+                return Err("command-line paste must be a single line without control keys".into());
+            }
+            self.input.as_mut().unwrap().push_str(&text);
+            Ok(())
+        });
+        self.input_error = result.err();
+    }
+
     fn display(&self, width: u16) -> Option<(String, Option<u16>)> {
         let columns = usize::from(width.saturating_sub(1));
+        if let Some(error) = &self.input_error {
+            return Some((clip(&format!("? {error}"), 0, columns), None));
+        }
         if let Some(input) = &self.input {
             let prefix = self
                 .search_direction
@@ -297,6 +327,7 @@ fn input_session(
         InputStart::Insert(mode) => mode,
         InputStart::Change { .. } => 'c',
     };
+    let mut paste_error = None;
     let result = (|| -> io::Result<()> {
         loop {
             let position = edit.cursor();
@@ -324,6 +355,13 @@ fn input_session(
                     usize::from(width.saturating_sub(1)),
                 );
             }
+            if let Some(error) = &paste_error {
+                frame.status = clip(
+                    &format!("? {error}"),
+                    0,
+                    usize::from(width.saturating_sub(1)),
+                );
+            }
             let mut output = io::stdout().lock();
             queue!(
                 output,
@@ -347,16 +385,20 @@ fn input_session(
                     *width = w;
                     *height = h;
                 }
-                Event::Key(key)
-                    if key.kind != KeyEventKind::Release
-                        && (if mode == 'R' {
-                            replace_key(&mut edit, key)
-                        } else {
-                            insert_key(&mut edit, key)
-                        })
-                        .map_err(io::Error::other)? =>
-                {
-                    return Ok(());
+                Event::Paste(text) => {
+                    paste_error = paste_input(&mut edit, mode == 'R', &text).err();
+                }
+                Event::Key(key) if key.kind != KeyEventKind::Release => {
+                    paste_error = None;
+                    let done = if mode == 'R' {
+                        replace_key(&mut edit, key)
+                    } else {
+                        insert_key(&mut edit, key)
+                    }
+                    .map_err(io::Error::other)?;
+                    if done {
+                        return Ok(());
+                    }
                 }
                 _ => {}
             }
@@ -488,8 +530,27 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 width = w;
                 height = h;
             }
+            Event::Paste(text) => {
+                if command.input.is_some() {
+                    command.paste(&text);
+                } else {
+                    let pending =
+                        replace_pending || prefix.digits != 0 || prefix.operator_count.is_some();
+                    prefix = NormalPrefix::default();
+                    replace_pending = false;
+                    command.message = if pending {
+                        Some("? paste cancelled pending command; nothing pasted".into())
+                    } else {
+                        state
+                            .paste(editor, &text)
+                            .err()
+                            .map(|error| format!("? {error}"))
+                    };
+                }
+            }
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 if command.input.is_some() {
+                    command.input_error = None;
                     if key.code == KeyCode::Enter {
                         let text = command.input.take().unwrap();
                         if let Some(forward) = command.search_direction {
@@ -671,6 +732,27 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_paste_is_literal_single_line_and_requires_enter() {
+        for search_direction in [None, Some(true), Some(false)] {
+            let mut command = CommandLine {
+                input: Some("prefix".into()),
+                search_direction,
+                ..CommandLine::default()
+            };
+            command.paste("中:quit");
+            assert_eq!(command.input.as_deref(), Some("prefix中:quit"));
+            for invalid in ["\r\nq!", "\x1b:q!", "\0", "\x03"] {
+                command.paste(invalid);
+                assert_eq!(command.input.as_deref(), Some("prefix中:quit"));
+                assert!(command.display(120).unwrap().0.contains("single line"));
+            }
+            command.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+            assert!(command.input_error.is_none());
+            assert_eq!(command.input.as_deref(), Some("prefix中:quitx"));
+        }
+    }
 
     #[test]
     fn replace_keys_commit_cancel_and_ignore_navigation() {
@@ -979,6 +1061,7 @@ mod tests {
             input: Some(String::new()),
             message: None,
             search_direction: None,
+            input_error: None,
         };
         for c in "w 中文".chars() {
             command.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));

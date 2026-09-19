@@ -9,6 +9,7 @@ pub enum InputAction {
     Backspace,
     Delete,
     Replace(char),
+    ReplaceText(String),
     RestoreReplacement,
 }
 
@@ -72,6 +73,7 @@ impl TextEdit<'_> {
             InputAction::Backspace => self.backspace(),
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
+            InputAction::ReplaceText(text) => self.replace_input_text(text),
             InputAction::RestoreReplacement => self.replace_backspace(),
         }
     }
@@ -105,6 +107,65 @@ impl TextEdit<'_> {
             was_empty,
         ));
         self.record(InputAction::Replace(character));
+        Ok(())
+    }
+
+    /// Replace literal text in one buffer operation, retaining per-scalar R
+    /// backspace history. LF splits the current line; it never consumes a file LF.
+    pub fn replace_input_text(&mut self, text: &str) -> Result<(), String> {
+        if text.contains('\r') {
+            return Err("carriage returns are not supported".into());
+        }
+        if text.is_empty() {
+            return Ok(());
+        }
+        let start = self.cursor;
+        let mut cursor = start;
+        let mut old = self
+            .draft
+            .line(start.row)
+            .unwrap_or("")
+            .chars()
+            .skip(start.column);
+        let mut overwritten = 0;
+        let mut history = Vec::new();
+        for (index, character) in text.chars().enumerate() {
+            let previous = if character == '\n' { None } else { old.next() };
+            overwritten += usize::from(previous.is_some());
+            let next = if character == '\n' {
+                Position {
+                    row: cursor.row + 1,
+                    column: 0,
+                }
+            } else {
+                Position {
+                    column: cursor.column + 1,
+                    ..cursor
+                }
+            };
+            history.push((
+                cursor,
+                next,
+                previous.map_or_else(String::new, |c| c.to_string()),
+                self.draft.is_empty() && index == 0,
+            ));
+            cursor = next;
+        }
+        self.cursor = self
+            .draft
+            .replace_text(
+                start,
+                Position {
+                    column: start.column + overwritten,
+                    ..start
+                },
+                text,
+            )
+            .map_err(str::to_owned)?;
+        self.replacements.extend(history);
+        if self.input_actions.is_some() {
+            self.record(InputAction::ReplaceText(text.to_owned()));
+        }
         Ok(())
     }
 

@@ -1,0 +1,155 @@
+"""Unix bracketed-paste protocol acceptance; run after cargo build."""
+import fcntl
+import os
+from pathlib import Path
+import pty
+import select
+import struct
+import subprocess
+import tempfile
+import termios
+import time
+
+BINARY = Path(__file__).resolve().parents[1] / "target/debug/vir"
+
+
+def receive(master, marker):
+    data = b""
+    deadline = time.monotonic() + 8
+    while marker not in data and time.monotonic() < deadline:
+        if select.select([master], [], [], 0.1)[0]:
+            data += os.read(master, 65536)
+    assert marker in data, (marker, data[-4000:])
+    return data
+
+
+class Session:
+    def __init__(self, directory, text):
+        self.directory = directory
+        self.path = directory / "text"
+        self.path.write_bytes(text)
+        self.master, self.slave = pty.openpty()
+        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 150, 0, 0))
+        self.original = termios.tcgetattr(self.slave)
+        self.process = subprocess.Popen([str(BINARY), "--vi", str(self.path)],
+            stdin=self.slave, stdout=self.slave, stderr=subprocess.PIPE,
+            env=dict(os.environ, VIR_RECOVERY_DIR=str(directory)))
+        assert b"\x1b[?2004h" in receive(self.master, b"[VIEW]")
+
+    def send(self, data, marker=None):
+        while data:
+            data = data[os.write(self.master, data):]
+        if marker is not None:
+            return receive(self.master, marker)
+
+    def paste(self, data, marker):
+        # Start, payload and terminator are deliberately separate writes.
+        self.send(b"\x1b[200~")
+        self.send(data)
+        return self.send(b"\x1b[201~", marker)
+
+    def save_exit(self, expected):
+        self.send(b":wq\r")
+        assert self.process.wait(timeout=5) == 0
+        data = receive(self.master, b"\x1b[?1049l")
+        assert b"\x1b[?2004l" in data
+        assert self.path.read_bytes() == expected
+        assert termios.tcgetattr(self.slave) == self.original
+        assert self.process.stderr.read() == b""
+        assert not list(self.directory.glob(".vir-recovery-*"))
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.wait()
+        os.close(self.master)
+        os.close(self.slave)
+
+
+def insert(session):
+    session.send(b"i", b"[INSERT]")
+    payload = b":q!\x1b\x03\x08\x7f\x00\tX\r\nY"
+    session.paste(payload, b"Ytail")
+    assert session.process.poll() is None
+    fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+    receive(session.master, b"\x1b[6;1H[INSERT]")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"u", b"1/1  col 1")
+    session.send(b".", b"Ytail")
+    session.save_exit(payload.replace(b"\r\n", b"\n") + b"tail\n")
+
+
+def replace(session):
+    session.send(b"R", b"[REPLACE]")
+    session.paste(b"X\nY", b"Ycdef")
+    session.send(b"\x7f", b"bcdef")
+    session.send(b"\x7f", b"Xbcdef")
+    session.send(b"Z", b"XZcdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"u", b"abcdef")
+    session.send(b".", b"XZcdef")
+    session.save_exit(b"XZcdef\n")
+
+
+def normal(session):
+    session.paste(b"XY", b"XYabcdef")
+    session.send(b"u", b"1/1  col 1")
+    session.send(b"u", b"XYabcdef")
+    # Undo uses the historical snapshot cursor; place back on pasted Y.
+    session.send(b"l", b"col 2")
+    session.send(b".", b"XYXYabcdef")
+    session.save_exit(b"XYXYabcdef\n")
+
+
+def pending_and_command(session):
+    for pending in [b"d", b"r", b"2", b"c"]:
+        session.send(pending)
+        session.paste(b":q!\n", b"paste cancelled pending command")
+        session.send(b":w\r", b"Written")
+        assert session.path.read_bytes() == b"abcdef\n"
+    session.send(b":", b"\x1b[8;1H:")
+    session.paste(b"wq\n", b"command-line paste must be a single line")
+    assert session.process.poll() is None
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b":", b"\x1b[8;1H:")
+    session.paste(b"wq", b":wq")
+    assert session.process.poll() is None
+    session.send(b"\x1b", b"[VIEW]")
+    session.save_exit(b"abcdef\n")
+
+
+def oversized(session):
+    session.paste(b"x" * 65537, b"paste exceeds 64 KiB")
+    session.send(b"i", b"[INSERT]")
+    session.paste(b"x" * 65537, b"paste exceeds 64 KiB")
+    session.paste(b"OK", b"OKabcdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.save_exit(b"OKabcdef\n")
+
+
+def crash(session):
+    session.send(b"R", b"[REPLACE]")
+    session.paste("中\n文".encode(), "文cdef".encode())
+    session.process.kill()
+    session.process.wait(timeout=5)
+    snapshots = list(session.directory.glob(".vir-recovery-*"))
+    assert len(snapshots) == 1
+    target = session.directory / "recovered"
+    result = subprocess.run([str(BINARY), "--ex", "--recover", str(snapshots[0])],
+        input=f"w {target}\nq\n", text=True, capture_output=True, timeout=5,
+        env=dict(os.environ, VIR_RECOVERY_DIR=str(session.directory)))
+    assert result.returncode == 0, result.stderr
+    assert target.read_text() == "中\n文cdef\n"
+    assert session.path.read_bytes() == b"abcdef\n"
+
+
+with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
+    for action in [insert, replace, normal, pending_and_command, oversized, crash]:
+        directory = Path(temporary) / action.__name__
+        directory.mkdir()
+        session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")
+        try:
+            action(session)
+        finally:
+            session.close()
+print("Paste: literal input, R/backspace, undo/dot, prefixes, command line, limits, resize, crash recovery and terminal cleanup passed")

@@ -100,7 +100,9 @@ impl ChangeRecord {
                     .iter()
                     .try_fold(1usize, |total, action| {
                         total.checked_add(match action {
-                            InputAction::Insert(text) => text.len().max(1),
+                            InputAction::Insert(text) | InputAction::ReplaceText(text) => {
+                                text.len().max(1)
+                            }
                             _ => 1,
                         })
                     })

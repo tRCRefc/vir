@@ -761,7 +761,9 @@ process = subprocess.Popen(
     cwd=BINARY.parents[2], stdin=slave, stdout=slave, stderr=slave,
 )
 try:
-    receive(master, b"test result: ok")
+    data = receive(master, b"test result: ok")
+    assert data.count(b"\x1b[?2004h") == 2
+    assert data.count(b"\x1b[?2004l") == 2
     assert process.wait(timeout=5) == 0
     assert termios.tcgetattr(slave) == original
 finally:

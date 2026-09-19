@@ -3,6 +3,8 @@ mod command;
 mod insert;
 mod motion;
 mod operator;
+mod paste;
+pub use paste::paste_input;
 mod repeat;
 pub use repeat::InputStart;
 mod search;
