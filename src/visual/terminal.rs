@@ -1,6 +1,6 @@
 use super::operator::Operator;
 use super::{InputStart, Motion, VisualState, clip, screen_column};
-use crate::editor::Editor;
+use crate::{editor::Editor, recovery::Recovery};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -266,6 +266,7 @@ fn insert_mode(
     mode: char,
     width: &mut u16,
     height: &mut u16,
+    recovery: &mut Recovery,
 ) -> io::Result<()> {
     let name = editor
         .path()
@@ -275,33 +276,54 @@ fn insert_mode(
     input_session(
         edit,
         state,
-        mode,
         &name,
         width,
         height,
         InputStart::Insert(mode),
+        recovery,
     )
 }
 
 fn input_session(
     mut edit: crate::editor::TextEdit<'_>,
     state: &mut VisualState,
-    mode: char,
     name: &str,
     width: &mut u16,
     height: &mut u16,
     start: InputStart,
+    recovery: &mut Recovery,
 ) -> io::Result<()> {
+    let mode = match start {
+        InputStart::Insert(mode) => mode,
+        InputStart::Change { .. } => 'c',
+    };
     let result = (|| -> io::Result<()> {
         loop {
             let position = edit.cursor();
             state.row = position.row;
             state.column = position.column;
-            let frame = if mode == 'R' {
+            let recovery_error = recovery
+                .checkpoint(
+                    edit.original().path(),
+                    edit.buffer(),
+                    edit.original().is_modified() || edit.has_changes(),
+                )
+                .err();
+            let mut frame = if mode == 'R' {
                 state.replace_frame(edit.buffer(), name, *width, *height)
             } else {
                 state.insert_frame(edit.buffer(), name, *width, *height)
             };
+            if let Some(error) = recovery_error {
+                frame.status = clip(
+                    &format!(
+                        "[{}] ? recovery unavailable: {error}",
+                        if mode == 'R' { "REPLACE" } else { "INSERT" }
+                    ),
+                    0,
+                    usize::from(width.saturating_sub(1)),
+                );
+            }
             let mut output = io::stdout().lock();
             queue!(
                 output,
@@ -387,6 +409,12 @@ fn replace_key(edit: &mut crate::editor::TextEdit<'_>, key: KeyEvent) -> Result<
 }
 
 pub fn run(editor: &mut Editor) -> io::Result<()> {
+    let mut recovery = Recovery::for_editor(editor)?;
+    run_session(editor, &mut recovery)?;
+    recovery.finish()
+}
+
+fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
             "visual mode requires a terminal on stdin and stdout",
@@ -399,6 +427,9 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
     let mut replace_pending = false;
     let (mut width, mut height) = terminal::size()?;
     loop {
+        if let Err(error) = recovery.observe(editor) {
+            command.message = Some(format!("? recovery unavailable: {error}"));
+        }
         let name = editor
             .path()
             .map(|p| p.display().to_string())
@@ -523,11 +554,11 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                             Ok(edit) => input_session(
                                 edit,
                                 &mut state,
-                                'c',
                                 &name,
                                 &mut width,
                                 &mut height,
                                 InputStart::Change { motion, count },
+                                recovery,
                             )?,
                             Err(error) => command.message = Some(format!("? {error}")),
                         }
@@ -568,7 +599,7 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
                     if let KeyCode::Char(mode @ ('i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C' | 'R')) =
                         key.code
                     {
-                        insert_mode(editor, &mut state, mode, &mut width, &mut height)?;
+                        insert_mode(editor, &mut state, mode, &mut width, &mut height, recovery)?;
                         continue;
                     }
                     if key.code == KeyCode::Char('u') {

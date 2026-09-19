@@ -3,6 +3,9 @@ vir - basic ex editor and visual frontend
 Usage:
   vir --ex [file ...]   Edit UTF-8/LF files; missing files start empty
   vir --vi [file]      Open a file in a terminal
+  vir --recover-list [directory]  List recovery snapshots (default: cwd or VIR_RECOVERY_DIR)
+  vir --vi --recover SNAPSHOT     Recover text into an unnamed visual buffer
+  vir --ex --recover SNAPSHOT     Recover text into an unnamed ex buffer
   vir --help           Show this help
   vir -h               Show this help
 
@@ -59,7 +62,7 @@ Behavior and limits:
   A newly opened missing target cannot overwrite a file that appears before
   its first save. The final check and publication still have a race window.
 - No full BRE compatibility, macros, next-with-new-list,
-  substitution confirmation, multi-line replacement, or recovery yet.
+  substitution confirmation, or multi-line replacement yet.
 
 Legacy: vir <unused-opt> <filename> prints a file without editing it.
 This old two-argument entry point is retained; use --ex for editing.
@@ -170,5 +173,25 @@ combining sequences are not fully supported. The last terminal column is
 reserved to avoid autowrap. Browsing and searching never change text;
 :w/:wq write files. Multiline :a/:i/:c, general counts, autoindent
 and bracketed paste are not implemented. Terminal I/O errors retain the
-current Insert draft in memory before returning; no recovery file or
-automatic save is provided.
+current Insert draft in memory before returning. Recovery snapshots are
+maintained separately; the original file is written only by save commands.
+
+Crash recovery:
+- CLI sessions checkpoint changed text automatically, including visual input
+  drafts before rendering and complete ex input lines before the next read.
+- Snapshots are private .vir-recovery-* files beside the initial file. Unnamed
+  buffers or missing parent directories use cwd. VIR_RECOVERY_DIR overrides
+  this with an existing directory; the directory stays fixed for the session.
+- Use --recover-list DIRECTORY to discover candidates, then --vi/--ex --recover
+  SNAPSHOT. Restored text is modified and unnamed: w NEW_PATH exports it without
+  granting overwrite rights to the original. Undo/registers/cursor are not restored.
+- The selected source snapshot stays intact; remove it manually after checking
+  the recovered text. Listed snapshots may belong to running sessions.
+- Successful full saves/exports, reloads and deliberate normal exits clean this
+  session's snapshot. q! and ex EOF deliberately discard unsaved recovery data.
+  Errors, panics and process kills retain the last completed checkpoint.
+- Recovery I/O failures are shown and do not block editing or saving. Only the
+  last successful checkpoint is recoverable; input not yet processed is not.
+- Snapshots are limited to 128 MiB, use full-text writes and sync on each change.
+  Unix also syncs the recovery directory. This is not a complete power-loss
+  guarantee: normal file saves still lack directory fsync. No automatic merge.

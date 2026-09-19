@@ -37,6 +37,13 @@ impl Editor {
         }
     }
 
+    /// Restore text as a dirty unnamed buffer, without trusting a stale path/version.
+    pub fn from_recovery(buffer: TextBuffer) -> Self {
+        let mut editor = Self::from_buffer(buffer);
+        editor.modified = true;
+        editor
+    }
+
     pub fn unnamed_register(&self) -> Option<&Register> {
         self.unnamed.as_ref()
     }

@@ -38,6 +38,10 @@ impl Editor {
 }
 
 impl TextEdit<'_> {
+    pub(crate) fn original(&self) -> &Editor {
+        self.editor
+    }
+
     pub fn has_changes(&self) -> bool {
         self.draft != self.editor.buffer
     }

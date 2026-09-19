@@ -2,7 +2,7 @@
 
 use std::io::{self, BufRead, Write};
 
-use crate::editor::Editor;
+use crate::{editor::Editor, recovery::Recovery};
 
 /// Run a script until q or EOF, including EOF with unsaved changes.
 /// Command errors are printed and the loop continues. Input errors abort the
@@ -22,6 +22,18 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
     editor: &mut Editor,
     prompt: bool,
 ) -> io::Result<()> {
+    run_with_recovery(input, output, editor, prompt, &mut Recovery::disabled())
+}
+
+/// CLI session with explicit recovery ownership. Errors retain the last checkpoint.
+pub fn run_with_recovery<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    editor: &mut Editor,
+    prompt: bool,
+    recovery: &mut Recovery,
+) -> io::Result<()> {
+    checkpoint(recovery, editor, output)?;
     let mut line = String::new();
     loop {
         if prompt {
@@ -64,12 +76,21 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
                         break;
                     }
                     lines.push(value.to_owned());
+                    if recovery.is_enabled() {
+                        let mut draft = editor.clone();
+                        if super::command::execute_with_lines(parsed.clone(), &mut draft, &lines)
+                            .is_ok()
+                        {
+                            checkpoint(recovery, &draft, output)?;
+                        }
+                    }
                 }
                 super::command::execute_with_lines(parsed, editor, &lines)
             }
             Ok(parsed) => super::command::execute(parsed, editor),
             Err(error) => Err(error),
         };
+        checkpoint(recovery, editor, output)?;
         match result {
             Ok(result) => {
                 output.write_all(result.output.as_bytes())?;
@@ -84,4 +105,16 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
             }
         }
     }
+}
+
+fn checkpoint<W: Write>(
+    recovery: &mut Recovery,
+    editor: &Editor,
+    output: &mut W,
+) -> io::Result<()> {
+    if let Err(error) = recovery.observe(editor) {
+        writeln!(output, "? recovery unavailable: {error}")?;
+        output.flush()?;
+    }
+    Ok(())
 }
