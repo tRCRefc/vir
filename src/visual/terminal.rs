@@ -1,12 +1,10 @@
-use super::input::{InputSession, InputTarget};
+use super::input::InputSession;
+use super::input_keys::InputKeys;
 use super::keys::{NormalPrefix, PrefixAction, normal_motion};
 use super::operator::Operator;
 use super::paste::normalize;
 use super::{InputStart, Motion, VisualState, clip, screen_column};
-use crate::{
-    editor::{Editor, InputAction},
-    recovery::Recovery,
-};
+use crate::{editor::Editor, recovery::Recovery};
 use crossterm::{
     cursor,
     event::{
@@ -176,6 +174,7 @@ fn input_session(
 ) -> io::Result<()> {
     let mode = edit.mode();
     let mut input_error = None;
+    let mut keys = InputKeys::default();
     let result = (|| -> io::Result<()> {
         loop {
             let position = edit.cursor();
@@ -193,6 +192,16 @@ fn input_session(
             } else {
                 state.insert_frame(edit.buffer(), name, *width, *height)
             };
+            if keys.is_quoted() {
+                frame.status = clip(
+                    &format!(
+                        "[{}] quote: type one character",
+                        if mode == 'R' { "REPLACE" } else { "INSERT" }
+                    ),
+                    0,
+                    usize::from(width.saturating_sub(1)),
+                );
+            }
             if let Some(error) = recovery_error {
                 frame.status = clip(
                     &format!(
@@ -234,15 +243,15 @@ fn input_session(
                     *height = h;
                 }
                 Event::Paste(text) => {
-                    input_error = edit.paste(&text).err();
+                    input_error = if keys.cancel_quote() {
+                        Some("quoted input cancelled; nothing pasted".into())
+                    } else {
+                        edit.paste(&text).err()
+                    };
                 }
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     input_error = None;
-                    let done = if mode == 'R' {
-                        replace_key(&mut edit, key)
-                    } else {
-                        insert_key(&mut edit, key)
-                    };
+                    let done = keys.key(&mut edit, mode == 'R', key);
                     match done {
                         Ok(true) => return Ok(()),
                         Ok(false) => {}
@@ -261,47 +270,6 @@ fn input_session(
     }
     .map_err(io::Error::other)?;
     result
-}
-
-fn insert_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
-    match key.code {
-        KeyCode::Esc => return Ok(true),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
-        KeyCode::Backspace => edit.apply_input(&InputAction::Backspace)?,
-        KeyCode::Delete => edit.apply_input(&InputAction::Delete)?,
-        KeyCode::Enter => edit.apply_input(&InputAction::Insert("\n".into()))?,
-        KeyCode::Tab => edit.apply_input(&InputAction::Insert("\t".into()))?,
-        KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && !c.is_control() =>
-        {
-            edit.apply_input(&InputAction::Insert(c.to_string()))?
-        }
-        _ => {}
-    }
-    Ok(false)
-}
-
-fn replace_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
-    match key.code {
-        KeyCode::Esc => return Ok(true),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
-        KeyCode::Backspace => edit.apply_input(&InputAction::RestoreReplacement)?,
-        KeyCode::Enter => edit.apply_input(&InputAction::Replace('\n'))?,
-        KeyCode::Tab => edit.apply_input(&InputAction::Replace('\t'))?,
-        KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && !c.is_control() =>
-        {
-            edit.apply_input(&InputAction::Replace(c))?
-        }
-        _ => {}
-    }
-    Ok(false)
 }
 
 pub fn run(editor: &mut Editor) -> io::Result<()> {
@@ -622,79 +590,6 @@ mod tests {
             command.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
             assert!(command.input_error.is_none());
             assert_eq!(command.input.as_deref(), Some("prefix中:quitx"));
-        }
-    }
-
-    #[test]
-    fn replace_keys_commit_cancel_and_ignore_navigation() {
-        for exit in [
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-        ] {
-            let mut editor = Editor::default();
-            let mut edit = editor
-                .begin_text_edit(crate::buffer::Position::default())
-                .unwrap();
-            for code in [
-                KeyCode::Char('中'),
-                KeyCode::Tab,
-                KeyCode::Enter,
-                KeyCode::Char('x'),
-                KeyCode::Backspace,
-                KeyCode::Backspace,
-            ] {
-                assert!(!replace_key(&mut edit, KeyEvent::new(code, KeyModifiers::NONE)).unwrap());
-            }
-            let before = edit.buffer().clone();
-            for code in [KeyCode::Left, KeyCode::Delete] {
-                assert!(!replace_key(&mut edit, KeyEvent::new(code, KeyModifiers::NONE)).unwrap());
-            }
-            assert_eq!(edit.buffer(), &before);
-            assert!(replace_key(&mut edit, exit).unwrap());
-            edit.commit().unwrap();
-            assert_eq!(editor.buffer().to_text(), "中\t\n");
-            editor.undo().unwrap();
-            assert!(editor.buffer().is_empty());
-        }
-    }
-
-    #[test]
-    fn insert_keys_treat_commands_as_text_and_commit_on_escape_or_control_c() {
-        for exit in [
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-        ] {
-            let mut editor = Editor::default();
-            let mut edit = editor
-                .begin_text_edit(crate::buffer::Position::default())
-                .unwrap();
-            for c in "q:中".chars() {
-                assert!(
-                    !insert_key(
-                        &mut edit,
-                        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
-                    )
-                    .unwrap()
-                );
-            }
-            insert_key(&mut edit, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
-            insert_key(&mut edit, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
-            insert_key(
-                &mut edit,
-                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-            )
-            .unwrap();
-            insert_key(&mut edit, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)).unwrap();
-            insert_key(
-                &mut edit,
-                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
-            )
-            .unwrap();
-            assert!(insert_key(&mut edit, exit).unwrap());
-            edit.commit().unwrap();
-            assert_eq!(editor.buffer().to_text(), "q:中\t\n");
-            editor.undo().unwrap();
-            assert!(editor.buffer().is_empty());
         }
     }
 

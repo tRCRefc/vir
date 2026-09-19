@@ -1,0 +1,336 @@
+//! Input key decoding and one-character quoting, independent of terminal I/O.
+use super::input::InputTarget;
+use crate::editor::InputAction;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
+#[derive(Default)]
+pub(super) struct InputKeys {
+    quoted: bool,
+}
+
+impl InputKeys {
+    pub(super) fn is_quoted(&self) -> bool {
+        self.quoted
+    }
+    pub(super) fn cancel_quote(&mut self) -> bool {
+        std::mem::take(&mut self.quoted)
+    }
+
+    pub(super) fn key(
+        &mut self,
+        edit: &mut impl InputTarget,
+        replace: bool,
+        key: KeyEvent,
+    ) -> Result<bool, String> {
+        if key.kind == KeyEventKind::Release {
+            return Ok(false);
+        }
+        if self.quoted {
+            let c = quoted_character(key)?;
+            // Consume the quoted key even if the transaction rejects its cost.
+            self.quoted = false;
+            let action = if replace {
+                InputAction::ReplaceText(c.to_string())
+            } else {
+                InputAction::Insert(c.to_string())
+            };
+            edit.apply_input(&action)?;
+            return Ok(false);
+        }
+        if matches!(key.code, KeyCode::Char('v' | 'q'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+        {
+            self.quoted = true;
+            return Ok(false);
+        }
+        if replace {
+            replace_key(edit, key)
+        } else {
+            insert_key(edit, key)
+        }
+    }
+}
+
+fn quoted_character(key: KeyEvent) -> Result<char, String> {
+    if key.modifiers.intersects(
+        KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
+    ) {
+        return Err("quote requires one character; still waiting".into());
+    }
+    let c = match key.code {
+        KeyCode::Esc => '\x1b',
+        KeyCode::Enter => '\n',
+        KeyCode::Tab => '\t',
+        // Crossterm's legacy Unix decoder maps DEL to Backspace, ^H to Ctrl-h.
+        KeyCode::Backspace => '\x7f',
+        KeyCode::Null => '\0',
+        KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => match c {
+            ' ' | '@' | '2' => '\0',
+            '3' => '\x1b',
+            '4'..='7' => (c as u8 - b'4' + 0x1c) as char,
+            '8' => '\x7f',
+            'a'..='z' => (c as u8 - b'a' + 1) as char,
+            'A'..='_' => (c as u8 & 0x1f) as char,
+            '?' => '\x7f',
+            _ if c.is_ascii_control() => c,
+            _ => return Err("quote requires one character; still waiting".into()),
+        },
+        KeyCode::Char(c) => c,
+        _ => return Err("quote requires one character; still waiting".into()),
+    };
+    match c {
+        '\0' => Err("quoted NUL is unsupported; still waiting".into()),
+        '\r' => Ok('\n'), // The text model and terminal Enter use LF.
+        _ => Ok(c),
+    }
+}
+
+fn insert_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
+    match key.code {
+        KeyCode::Esc => return Ok(true),
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
+        KeyCode::Backspace => edit.apply_input(&InputAction::Backspace)?,
+        KeyCode::Delete => edit.apply_input(&InputAction::Delete)?,
+        KeyCode::Enter => edit.apply_input(&InputAction::Insert("\n".into()))?,
+        KeyCode::Tab => edit.apply_input(&InputAction::Insert("\t".into()))?,
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !c.is_control() =>
+        {
+            edit.apply_input(&InputAction::Insert(c.to_string()))?
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn replace_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
+    match key.code {
+        KeyCode::Esc => return Ok(true),
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
+        KeyCode::Backspace => edit.apply_input(&InputAction::RestoreReplacement)?,
+        KeyCode::Enter => edit.apply_input(&InputAction::Replace('\n'))?,
+        KeyCode::Tab => edit.apply_input(&InputAction::Replace('\t'))?,
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !c.is_control() =>
+        {
+            edit.apply_input(&InputAction::Replace(c))?
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{buffer::TextBuffer, editor::Editor, visual::VisualState};
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+    fn editor() -> Editor {
+        Editor::from_buffer(TextBuffer::from_text("abcdef").unwrap())
+    }
+
+    #[test]
+    fn quote_maps_control_bytes_and_rejects_nul_and_noncharacter_keys() {
+        for (event, expected) in [
+            (ctrl('c'), '\x03'),
+            (ctrl('h'), '\x08'),
+            (ctrl('v'), '\x16'),
+            (ctrl('q'), '\x11'),
+            (ctrl('4'), '\x1c'),
+            (ctrl('5'), '\x1d'),
+            (ctrl('6'), '\x1e'),
+            (ctrl('7'), '\x1f'),
+            (key(KeyCode::Esc), '\x1b'),
+            (key(KeyCode::Backspace), '\x7f'),
+            (key(KeyCode::Tab), '\t'),
+            (key(KeyCode::Enter), '\n'),
+            (ctrl('j'), '\n'),
+            (ctrl('m'), '\n'),
+            (key(KeyCode::Char('字')), '字'),
+        ] {
+            assert_eq!(quoted_character(event).unwrap(), expected);
+        }
+        for event in [
+            ctrl(' '),
+            key(KeyCode::Null),
+            key(KeyCode::Left),
+            key(KeyCode::Delete),
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
+        ] {
+            assert!(quoted_character(event).is_err());
+        }
+    }
+
+    #[test]
+    fn quoted_escape_and_interrupt_are_text_with_one_undo_and_literal_dot() {
+        for mode in ['i', 'R'] {
+            let mut editor = editor();
+            let mut state = VisualState::default();
+            let mut input = state.begin_counted_insert(&mut editor, mode, 3).unwrap();
+            let mut keys = InputKeys::default();
+            for event in [ctrl('v'), key(KeyCode::Esc), ctrl('q'), ctrl('c')] {
+                assert!(!keys.key(&mut input, mode == 'R', event).unwrap());
+            }
+            assert!(
+                keys.key(&mut input, mode == 'R', key(KeyCode::Esc))
+                    .unwrap()
+            );
+            input.commit(&mut state).unwrap();
+            let suffix = if mode == 'R' { "cdef" } else { "abcdef" };
+            let expected = format!("{}{suffix}", "\x1b\x03".repeat(3));
+            assert_eq!(editor.buffer().to_text(), expected);
+            editor.undo().unwrap();
+            assert_eq!(editor.buffer().to_text(), "abcdef");
+            state.column = 0;
+            state.repeat_change(&mut editor, None).unwrap();
+            assert_eq!(editor.buffer().to_text(), expected);
+        }
+    }
+
+    #[test]
+    fn pending_quote_survives_release_and_invalid_keys_but_can_cancel_for_paste() {
+        let mut editor = editor();
+        let state = VisualState::default();
+        let mut input = state.begin_counted_insert(&mut editor, 'i', 1).unwrap();
+        let mut keys = InputKeys::default();
+        keys.key(&mut input, false, ctrl('v')).unwrap();
+        let mut release = key(KeyCode::Esc);
+        release.kind = KeyEventKind::Release;
+        keys.key(&mut input, false, release).unwrap();
+        assert!(keys.is_quoted());
+        for event in [ctrl(' '), key(KeyCode::Left), key(KeyCode::Delete)] {
+            assert!(keys.key(&mut input, false, event).is_err());
+            assert!(keys.is_quoted());
+            assert_eq!(input.buffer().to_text(), "abcdef");
+        }
+        assert!(keys.cancel_quote());
+        assert!(!keys.cancel_quote());
+        assert!(keys.key(&mut input, false, key(KeyCode::Esc)).unwrap());
+    }
+
+    #[test]
+    fn quote_newline_consumes_count_and_replace_backspace_restores_control() {
+        let mut editor = editor();
+        let mut state = VisualState::default();
+        let mut input = state.begin_counted_insert(&mut editor, 'R', 3).unwrap();
+        let mut keys = InputKeys::default();
+        for event in [
+            ctrl('v'),
+            ctrl('c'),
+            key(KeyCode::Backspace),
+            key(KeyCode::Char('X')),
+            ctrl('v'),
+            ctrl('j'),
+            key(KeyCode::Char('Y')),
+        ] {
+            keys.key(&mut input, true, event).unwrap();
+        }
+        input.commit(&mut state).unwrap();
+        assert_eq!(editor.buffer().to_text(), "XXX\nYcdef");
+    }
+
+    #[test]
+    fn rejected_quoted_input_consumes_prefix_without_losing_accepted_text() {
+        let mut editor = editor();
+        let mut state = VisualState::default();
+        let mut input = state
+            .begin_counted_insert(&mut editor, 'i', 500_000)
+            .unwrap();
+        let mut keys = InputKeys::default();
+        keys.key(&mut input, false, key(KeyCode::Char('X')))
+            .unwrap();
+        keys.key(&mut input, false, ctrl('v')).unwrap();
+        assert!(keys.key(&mut input, false, ctrl('c')).is_err());
+        assert!(!keys.is_quoted());
+        assert_eq!(input.buffer().to_text(), "Xabcdef");
+        keys.key(&mut input, false, key(KeyCode::Backspace))
+            .unwrap();
+        keys.key(&mut input, false, key(KeyCode::Esc)).unwrap();
+        input.commit(&mut state).unwrap();
+        assert_eq!(editor.buffer().to_text(), "abcdef");
+    }
+    #[test]
+    fn replace_keys_commit_cancel_and_ignore_navigation() {
+        for exit in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            let mut editor = Editor::default();
+            let mut edit = editor
+                .begin_text_edit(crate::buffer::Position::default())
+                .unwrap();
+            for code in [
+                KeyCode::Char('中'),
+                KeyCode::Tab,
+                KeyCode::Enter,
+                KeyCode::Char('x'),
+                KeyCode::Backspace,
+                KeyCode::Backspace,
+            ] {
+                assert!(!replace_key(&mut edit, KeyEvent::new(code, KeyModifiers::NONE)).unwrap());
+            }
+            let before = edit.buffer().clone();
+            for code in [KeyCode::Left, KeyCode::Delete] {
+                assert!(!replace_key(&mut edit, KeyEvent::new(code, KeyModifiers::NONE)).unwrap());
+            }
+            assert_eq!(edit.buffer(), &before);
+            assert!(replace_key(&mut edit, exit).unwrap());
+            edit.commit().unwrap();
+            assert_eq!(editor.buffer().to_text(), "中\t\n");
+            editor.undo().unwrap();
+            assert!(editor.buffer().is_empty());
+        }
+    }
+
+    #[test]
+    fn insert_keys_treat_commands_as_text_and_commit_on_escape_or_control_c() {
+        for exit in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            let mut editor = Editor::default();
+            let mut edit = editor
+                .begin_text_edit(crate::buffer::Position::default())
+                .unwrap();
+            for c in "q:中".chars() {
+                assert!(
+                    !insert_key(
+                        &mut edit,
+                        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+                    )
+                    .unwrap()
+                );
+            }
+            insert_key(&mut edit, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+            insert_key(&mut edit, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+            insert_key(
+                &mut edit,
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            )
+            .unwrap();
+            insert_key(&mut edit, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)).unwrap();
+            insert_key(
+                &mut edit,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            )
+            .unwrap();
+            assert!(insert_key(&mut edit, exit).unwrap());
+            edit.commit().unwrap();
+            assert_eq!(editor.buffer().to_text(), "q:中\t\n");
+            editor.undo().unwrap();
+            assert!(editor.buffer().is_empty());
+        }
+    }
+}

@@ -177,6 +177,41 @@ def counted_replace(session):
     session.save_exit(b"abcdef\n")
 
 
+def quoted_input(session):
+    session.send(b"i\x16", b"quote: type one character")
+    fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+    receive(session.master, b"\x1b[6;1H[INSERT] quote:")
+    # Standalone ESC must be a distinct terminal event, not Alt plus next key.
+    session.send(b"\x1b", b"^[abcdef")
+    session.send(b"\x16\x03", b"^[^Cabcdef")
+    session.send(b"\x11\x08", b"^[^C^Habcdef")
+    session.send(b"\x16\x7f", b"^[^C^H^?abcdef")
+    session.send(b"\x16\x1c", b"^[^C^H^?^\\abcdef")
+    session.send(b"\x16\x00", b"quoted NUL is unsupported")
+    session.send(b"9", b"9abcdef")  # No numeric-escape accumulation.
+    session.send(b"\x16", b"quote: type one character")
+    session.paste(b"must not execute", b"nothing pasted")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    literal = b"\x1b\x03\x08\x7f\x1c9"
+    assert session.path.read_bytes() == literal + b"abcdef\n"
+    session.send(b"u", b"abcdef")
+    session.send(b"0.", b"9abcdef")
+    session.send(b"u", b"abcdef")
+    session.send(b"03R\x16\x03", b"^Cbcdef")
+    session.send(b"\x7f", b"abcdef")
+    session.send(b"\x16\x03", b"^Cbcdef")
+    session.send(b"\x1b", b"^C^C^Cbcdef")
+    session.send(b"u", b"abcdef")
+    session.send(b"03RZ\x16\x0aY", b"Ycdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"ZZZ\nYcdef\n"
+    session.send(b"g0cw\x16\x03", b"^C")
+    session.send(b"\x1b", b"[VIEW]")
+    session.save_exit(b"\x03\nYcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -194,7 +229,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")
