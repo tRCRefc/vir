@@ -156,6 +156,10 @@ Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys
 are ignored during Insert. Normal x deletes a character; u (or :u)
 undoes/restores the last edit, including a whole Insert session.
+U restores the current line to its initial text for this visit, at column 1.
+Leaving the line, structural edits or successful :e/:d/:s reset that baseline.
+U is one undoable edit; a second U reports no changes and preserves u.
+U keeps registers and the dot-repeat record; counts are unsupported.
 In Insert/change/R, Ctrl-V or Ctrl-Q quotes the next character: Esc and
 Ctrl-C become text; Enter/Ctrl-J/Ctrl-M split with LF. Quoted NUL is rejected.
 Resize preserves quoting; unsupported special keys keep waiting. Paste

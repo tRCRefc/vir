@@ -66,6 +66,7 @@ pub struct InputSession<'a> {
     prefix: String,
     actions: Vec<InputAction>,
     work: usize,
+    line_structure_changed: bool,
 }
 
 impl VisualState {
@@ -94,6 +95,8 @@ impl<'a> InputSession<'a> {
             return Err("counted input is supported only for i/a/I/A/R".into());
         }
         check_work(Some(1), count)?;
+        let line_structure_changed =
+            edit.buffer().line_count() != edit.original().buffer().line_count();
         edit.take_input_actions();
         Ok(Self {
             edit,
@@ -103,6 +106,7 @@ impl<'a> InputSession<'a> {
             prefix: String::new(),
             actions: Vec::new(),
             work: 1,
+            line_structure_changed,
         })
     }
 
@@ -144,6 +148,7 @@ impl<'a> InputSession<'a> {
             return Ok(());
         }
         let position = self.edit.cursor();
+        let line_count_before = self.edit.buffer().line_count();
         if matches!(action, InputAction::Backspace) && position == Position::default() {
             return Ok(());
         }
@@ -240,6 +245,8 @@ impl<'a> InputSession<'a> {
         } else {
             self.edit.apply_input(action)?;
         }
+        self.line_structure_changed |= self.edit.cursor().row != position.row
+            || self.edit.buffer().line_count() != line_count_before;
         if matches!(action, InputAction::RestoreReplacement) && self.edit.cursor() == position {
             return Ok(());
         }
@@ -292,6 +299,9 @@ impl<'a> InputSession<'a> {
             } else {
                 self.repetitions = 1;
             }
+        }
+        if self.line_structure_changed {
+            state.forget_line();
         }
         state.publish_input(self.edit, self.start, self.actions, self.repetitions)
     }

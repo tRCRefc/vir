@@ -309,6 +309,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 .set_current(state.row)
                 .map_err(|e| io::Error::other(format!("{e:?}")))?;
         }
+        state.checkpoint_line(editor);
         let mut output = io::stdout().lock();
         queue!(
             output,
@@ -513,6 +514,12 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                             &mut height,
                             recovery,
                         )?;
+                        continue;
+                    }
+                    if key.code == KeyCode::Char('U') {
+                        if let Err(error) = state.restore_line(editor) {
+                            command.message = Some(format!("? {error}"));
+                        }
                         continue;
                     }
                     if key.code == KeyCode::Char('u') {

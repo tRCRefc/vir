@@ -29,6 +29,12 @@ impl VisualState {
         let mut result = execute(parsed, editor)?;
         if matches!(
             command,
+            Command::Edit { .. } | Command::Delete | Command::Substitute
+        ) {
+            self.forget_line();
+        }
+        if matches!(
+            command,
             Command::Edit { .. } | Command::Delete | Command::Undo | Command::Substitute
         ) {
             self.row = editor.current().unwrap_or(0);

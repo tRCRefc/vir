@@ -4,6 +4,7 @@ mod input;
 mod input_keys;
 mod insert;
 mod keys;
+mod line_undo;
 pub use input::InputSession;
 mod motion;
 mod operator;
@@ -76,6 +77,7 @@ pub struct VisualState {
     preferred_column: usize,
     search_forward: Option<bool>,
     last_change: Option<repeat::ChangeRecord>,
+    line_undo: line_undo::LineUndo,
 }
 
 #[derive(Debug)]

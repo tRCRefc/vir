@@ -256,6 +256,31 @@ def backspace_at_limit(session):
     session.save_exit(b"abcdef\n")
 
 
+def line_undo(session):
+    session.send(b"rXllrY", b"XbYdef")
+    session.send(b"U", b"abcdef")
+    session.send(b"U", b"no line changes to restore")
+    session.send(b"u", b"XbYdef")
+    session.send(b"U", b"abcdef")
+    session.send(b"l.", b"aYcdef")
+    session.send(b":w\r", b"Written")
+    session.send(b"U", b"abcdef")
+    session.send(b"u", b"aYcdef")
+    session.send(b"j", b"2/2")
+    session.send(b"kU", b"no line changes to restore")
+    session.send(b"0rZ", b"ZYcdef")
+    session.send(b"i\r\x7f", b"ZYcdef")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"U", b"no line changes to restore")
+    session.send(b":e!\r", b"aYcdef")
+    session.send(b"U", b"no line changes to restore")
+    session.send(b"g0rQ", b"QYcdef")
+    fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+    receive(session.master, b"\x1b[6;1H[VIEW]")
+    session.send(b"U", b"aYcdef")
+    session.save_exit(b"aYcdef\nsecond\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -273,10 +298,10 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
-        session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")
+        session = Session(directory, b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"abcdef\n")
         try:
             action(session)
         finally:
