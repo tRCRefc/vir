@@ -1,6 +1,9 @@
 //! Visual frontend with search and ex editing commands. Layout is independent of terminal I/O.
 mod command;
+mod input;
 mod insert;
+mod keys;
+pub use input::InputSession;
 mod motion;
 mod operator;
 mod paste;

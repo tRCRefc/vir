@@ -142,6 +142,8 @@ with tempfile.TemporaryDirectory(prefix="vir-recovery-test-") as temporary:
     root = Path(temporary)
     for index, (keys, expected, marker) in enumerate([
         ("i中".encode(), "中alpha beta\n".encode(), "中alpha beta".encode()),
+        (b"3iX", b"Xalpha beta\n", b"Xalpha beta"),
+        (b"3iX\rY", b"XXX\nYalpha beta\n", b"Yalpha beta"),
         (b"RXY", b"XYpha beta\n", b"XYpha beta"),
         (b"cwnew", b"new beta\n", b"new beta"),
         (b"dw", b"beta\n", b"[+]"),

@@ -141,6 +141,11 @@ then appends at line end. Tab replaces one scalar; Enter splits the line.
 Backspace restores the previous Replace keystroke, including a split or
 append, and stops at session entry. Esc/Ctrl-C commits one undo for the
 whole session. Arrow keys and Delete are ignored; R counts are unsupported.
+Normal [count]i/a/I/A repeats the net first input segment. The first Enter
+consumes the count; later lines are inserted once (historical vi behavior).
+3iX<Enter>Y<Esc> inserts XXX then a newline and Y. Counted input is bounded
+before accepting each event; an error keeps earlier input and stays in Insert.
+Direct o/O counts are not supported yet.
 [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
 Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys
@@ -150,8 +155,9 @@ undoes/restores the last edit, including a whole Insert session.
 It covers Insert/change/Replace sessions, d/dd/D/x, r, J and p/P. 3.
 replaces the saved count, rather than multiplying it; a successful counted
 repeat keeps that count for the next dot. For changes it replaces the
-selection count and types the input once; for Insert/Replace it repeats
-input, opening a fresh line for each o/O repetition. Each dot is one undo.
+selection count and types the input once. i/a/I/A repeat only the first
+input segment; o/O/R currently repeat all input, opening a fresh line for
+each o/O repetition. Each dot is one undo.
 Movement, search, yank, undo, saving and ex commands do not replace the
 visual repeat record; file switches preserve it. Put repeats use the current
 unnamed register. Failed, cancelled or net-unchanged edits preserve the

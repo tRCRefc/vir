@@ -790,7 +790,62 @@ def counted_replace_session(directory):
         os.close(slave)
 
 
+def counted_insert_session(directory):
+    path = directory / "counted-insert"
+    path.write_text("abc\n")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    def send(keys, marker):
+        os.write(master, keys)
+        return receive(master, marker)
+    try:
+        receive(master, b"[VIEW]")
+        send(b"3iX", b"Xabc")
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 100, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        receive(master, b"\x1b[6;1H[INSERT]")
+        send(b"\x1b", b"XXXabc")
+        send(b"u", b"abc")
+        send(b"3iX\rY", b"Yabc")
+        send(b"\x1b", b"[VIEW]")
+        send(b":w\r", b"Written")
+        assert path.read_text() == "XXX\nYabc\n"
+        send(b"u", b"1/1")
+        send(b"0", b"col 1")
+        send(b"2aQ\x1b", b"aQQbc")
+        send(b"2IZ\x1b", b"ZZaQQbc")
+        send("3A字\x03".encode(), "ZZaQQbc字字字".encode())
+        send(b"2.", "ZZaQQbc字字字字字".encode())
+        send(b".", "ZZaQQbc字字字字字字字".encode())
+        send(b"u", "ZZaQQbc字字字字字".encode())
+        send(b"0", b"col 1")
+        send(b"3iab\x7fX\x1b", b"aXaXaXZZaQQbc")
+        send(b"u", b"ZZaQQbc")
+        # Budget rejection keeps the input transaction and allows correction.
+        send(b"500000iX", b"XZZaQQbc")
+        send(b"Y", b"input repeat too large")
+        send(b"\x7f\x1b", b"[VIEW]")
+        send(b"3i\x1b[200~P\r\nQ\x1b[201~", b"QZZaQQbc")
+        send(b"\x1b", b"[VIEW]")
+        send(b":w\r", b"Written")
+        assert path.read_text() == "PPP\nQZZaQQbc字字字字字\n"
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    counted_insert_session(Path(directory))
     counted_replace_session(Path(directory))
     conflict_session(Path(directory))
     repeat_session(Path(directory))

@@ -1,5 +1,8 @@
 //! Replay logical edits through the same range and transaction APIs as live input.
-use super::{Motion, VisualState};
+use super::{
+    Motion, VisualState,
+    input::{InputSession, validate_work},
+};
 use crate::editor::{Editor, InputAction, TextEdit};
 
 /// The selection/entry operation preceding a text input transaction.
@@ -93,43 +96,28 @@ impl ChangeRecord {
                 actions,
                 repetitions,
             } => {
-                // Counts are untrusted input. Bound input expansion before touching
-                // the draft; unlike deletion, insertion cannot clamp at EOF.
-                const MAX_INPUT_REPLAY_WORK: usize = 1_000_000;
-                let work = actions
-                    .iter()
-                    .try_fold(1usize, |total, action| {
-                        total.checked_add(match action {
-                            InputAction::Insert(text) | InputAction::ReplaceText(text) => {
-                                text.len().max(1)
-                            }
-                            _ => 1,
-                        })
-                    })
-                    .and_then(|work| work.checked_mul(*repetitions));
-                if work.is_none_or(|work| work > MAX_INPUT_REPLAY_WORK) {
-                    return Err("input repeat too large".into());
-                }
+                validate_work(actions, *repetitions)?;
                 let mut edit = start.begin(state, editor)?;
                 // Replay uses this descriptor again, not a recording of its
                 // expanded actions (which would multiply the next dot twice).
                 edit.take_input_actions();
-                if let (InputStart::Insert('i' | 'a' | 'I' | 'A'), [InputAction::Insert(text)]) =
-                    (start, actions.as_slice())
-                {
-                    edit.insert(&text.repeat(*repetitions))?;
-                } else {
-                    for index in 0..*repetitions {
-                        if index > 0 {
-                            match start {
-                                InputStart::Insert('o') => edit.open_line_below()?,
-                                InputStart::Insert('O') => edit.open_line_above()?,
-                                _ => {}
-                            }
+                if matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A')) {
+                    let mut session = InputSession::new(edit, start.clone(), *repetitions)?;
+                    for action in actions {
+                        session.apply_input(action)?;
+                    }
+                    return session.commit(state);
+                }
+                for index in 0..*repetitions {
+                    if index > 0 {
+                        match start {
+                            InputStart::Insert('o') => edit.open_line_below()?,
+                            InputStart::Insert('O') => edit.open_line_above()?,
+                            _ => {}
                         }
-                        for action in actions {
-                            edit.apply_input(action)?;
-                        }
+                    }
+                    for action in actions {
+                        edit.apply_input(action)?;
                     }
                 }
                 state.finish_insert(edit.commit()?);
@@ -147,15 +135,25 @@ impl VisualState {
         mut edit: TextEdit<'_>,
         start: InputStart,
     ) -> Result<(), String> {
-        let changed = edit.has_changes();
         let actions = edit.take_input_actions();
+        self.publish_input(edit, start, actions, 1)
+    }
+
+    pub(super) fn publish_input(
+        &mut self,
+        edit: TextEdit<'_>,
+        start: InputStart,
+        actions: Vec<InputAction>,
+        repetitions: usize,
+    ) -> Result<(), String> {
+        let changed = edit.has_changes();
         let position = edit.commit()?;
         self.finish_insert(position);
         if changed {
             self.last_change = Some(ChangeRecord::Input {
                 start: start.normalized(),
                 actions,
-                repetitions: 1,
+                repetitions,
             });
         }
         Ok(())
