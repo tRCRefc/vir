@@ -261,3 +261,20 @@ fn corrupt_cli_recovery_fails_before_editing_or_writing() {
             .contains("invalid:")
     );
 }
+
+#[test]
+fn missing_cached_snapshot_is_recreated_without_another_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut journal = Recovery::in_directory(dir.path().to_owned());
+    let editor = Editor::from_recovery(text("still unsaved"));
+    journal.observe(&editor).unwrap();
+    fs::remove_file(journal.path().unwrap()).unwrap();
+    journal.observe(&editor).unwrap();
+    assert_eq!(
+        recovery::read(journal.path().unwrap()).unwrap().buffer,
+        *editor.buffer()
+    );
+    fs::remove_file(journal.path().unwrap()).unwrap();
+    fs::create_dir(journal.path().unwrap()).unwrap();
+    assert!(journal.observe(&editor).is_err());
+}

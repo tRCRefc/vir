@@ -74,6 +74,19 @@ impl Recovery {
         if !dirty {
             return self.finish();
         }
+        // The cache describes our last publication, not the continued existence
+        // of the file. Recreate accidental deletion even without another edit.
+        if let Some(path) = &self.path {
+            match fs::symlink_metadata(path) {
+                Ok(metadata) if metadata.is_file() => {}
+                Ok(_) => return Err(invalid("recovery target is not a regular file")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    self.path = None;
+                    self.last = None;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let source = match source {
             Some(path) => std::path::absolute(path)?.to_string_lossy().into_owned(),
             None => String::new(),
