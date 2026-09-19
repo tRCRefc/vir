@@ -72,8 +72,8 @@ fn insert_modes_repeat_logical_input_and_count_without_compounding() {
         ('a', "ab", "aXb", "aXXXb"),
         ('I', "  ab", "  Xab", "  XXXab"),
         ('A', "ab", "abX", "abXXX"),
-        ('o', "ab", "ab\nX\n", "ab\nX\nX\nX\n"),
-        ('O', "ab", "X\nab\n", "X\nX\nX\nab\n"),
+        ('o', "ab", "ab\nX\n", "ab\nX\nX\n"),
+        ('O', "ab", "X\nab\n", "X\nX\nab\n"),
     ] {
         let mut editor = editor(initial);
         let mut state = VisualState::default();

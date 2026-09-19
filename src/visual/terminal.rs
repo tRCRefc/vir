@@ -527,7 +527,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
-                    if let KeyCode::Char(mode @ ('o' | 'O' | 'C' | 'R')) = key.code {
+                    if let KeyCode::Char(mode @ ('C' | 'R')) = key.code {
                         insert_mode(
                             editor,
                             &mut state,

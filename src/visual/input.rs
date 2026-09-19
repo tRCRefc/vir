@@ -76,7 +76,7 @@ impl<'a> InputSession<'a> {
         start: InputStart,
         count: usize,
     ) -> Result<Self, String> {
-        let count = count.max(1);
+        let count = start.input_count(count);
         if count > 1 && !matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A')) {
             return Err("counted input is supported only for i/a/I/A".into());
         }

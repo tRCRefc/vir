@@ -145,7 +145,8 @@ Normal [count]i/a/I/A repeats the net first input segment. The first Enter
 consumes the count; later lines are inserted once (historical vi behavior).
 3iX<Enter>Y<Esc> inserts XXX then a newline and Y. Counted input is bounded
 before accepting each event; an error keeps earlier input and stays in Insert.
-Direct o/O counts are not supported yet.
+o/O accept counts but open input only once: historical vi used these counts
+only to reserve screen space on old terminals, not to repeat text.
 [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
 Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys
@@ -156,8 +157,8 @@ It covers Insert/change/Replace sessions, d/dd/D/x, r, J and p/P. 3.
 replaces the saved count, rather than multiplying it; a successful counted
 repeat keeps that count for the next dot. For changes it replaces the
 selection count and types the input once. i/a/I/A repeat only the first
-input segment; o/O/R currently repeat all input, opening a fresh line for
-each o/O repetition. Each dot is one undo.
+input segment; o/O open and type once even with n. (historical vi). R
+currently repeats all input. Each dot is one undo.
 Movement, search, yank, undo, saving and ex commands do not replace the
 visual repeat record; file switches preserve it. Put repeats use the current
 unnamed register. Failed, cancelled or net-unchanged edits preserve the

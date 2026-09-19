@@ -1,5 +1,5 @@
 //! Normal-mode counts and command prefixes; no terminal I/O or text mutation.
-use super::{Motion, input::MAX_INPUT_WORK, operator::Operator};
+use super::{InputStart, Motion, input::MAX_INPUT_WORK, operator::Operator};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Default)]
@@ -100,10 +100,10 @@ impl NormalPrefix {
             }
             return Err("unsupported operator motion; command cancelled");
         }
-        if let KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A')) = key.code {
+        if let KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O')) = key.code {
             let count = self.digits.max(1);
             *self = Self::default();
-            if count > MAX_INPUT_WORK {
+            if InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
                 return Err("input repeat too large");
             }
             return Ok(PrefixAction::Insert(mode, count));
@@ -174,17 +174,40 @@ mod tests {
     use super::*;
     use crate::{editor::Editor, visual::VisualState};
     #[test]
+    fn open_screen_counts_accept_large_values_but_overflow_cancels() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        for mode in ['o', 'O'] {
+            for c in usize::MAX.to_string().chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            assert_eq!(
+                prefix.key(key(mode)),
+                Ok(PrefixAction::Insert(mode, usize::MAX))
+            );
+            for c in usize::MAX.to_string().chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            assert!(prefix.key(key('0')).is_err());
+            assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 1)));
+            prefix.key(key('d')).unwrap();
+            assert!(prefix.key(key(mode)).is_err());
+            assert!(!prefix.is_pending());
+        }
+    }
+
+    #[test]
     fn counted_input_prefix_is_bounded_and_cancellation_clears_state() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let mut prefix = NormalPrefix::default();
-        for mode in ['i', 'a', 'I', 'A'] {
+        for mode in ['i', 'a', 'I', 'A', 'o', 'O'] {
             prefix.key(key('3')).unwrap();
             assert!(prefix.is_pending());
             assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 3)));
             assert!(!prefix.is_pending());
             assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 1)));
         }
-        for mode in ['o', 'O', 'R', 'C'] {
+        for mode in ['R', 'C'] {
             prefix.key(key('2')).unwrap();
             assert!(prefix.key(key(mode)).is_err());
             assert_eq!(prefix.key(key('i')), Ok(PrefixAction::Insert('i', 1)));
@@ -431,7 +454,7 @@ mod tests {
             assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
         }
         for sequence in [
-            "3o", "dq", "dg", "9x", "dJ", "2C", "3D", "dr", "cd", "dc", "cq", "yd", "cy", "yp",
+            "3R", "dq", "dg", "9x", "dJ", "2C", "3D", "dr", "cd", "dc", "cq", "yd", "cy", "yp",
         ] {
             for c in sequence[..sequence.len() - 1].chars() {
                 prefix.key(key(c)).unwrap();

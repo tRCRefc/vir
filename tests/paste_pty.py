@@ -127,6 +127,30 @@ def oversized(session):
     session.save_exit(b"OKabcdef\n")
 
 
+def counted_open(session):
+    session.send(b"3o", b"[INSERT]")
+    fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+    receive(session.master, b"\x1b[6;1H[INSERT]")
+    session.paste("字\r\nY".encode(), b"Y")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_text() == "abcdef\n字\nY\n"
+    session.send(b"u", b"1/1")
+    session.send(b"2.", b"Y")
+    session.send(b"3OQ\x03", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_text() == "abcdef\n字\nQ\nY\n"
+    maximum = (1 << (struct.calcsize("P") * 8)) - 1
+    session.send(str(maximum).encode() + b".", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_text() == "abcdef\n字\nQ\nQ\nY\n"
+    # A representable screen count is ignored; arithmetic overflow is cancelled.
+    session.send(str(maximum).encode() + b"0", b"count too large")
+    session.send(str(maximum).encode() + b"o", b"[INSERT]")
+    session.send(b"\x1b", b"[VIEW]")
+    session.save_exit("abcdef\n字\nQ\n\nQ\nY\n".encode())
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -144,7 +168,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")

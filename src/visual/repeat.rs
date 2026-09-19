@@ -16,6 +16,16 @@ pub enum InputStart {
 }
 
 impl InputStart {
+    /// Historical voOpen uses its count only for terminal screen space.
+    /// It always calls vappend with one input repetition.
+    pub(super) fn input_count(&self, count: usize) -> usize {
+        if matches!(self, Self::Insert('o' | 'O')) {
+            1
+        } else {
+            count.max(1)
+        }
+    }
+
     fn normalized(self) -> Self {
         if self == Self::Insert('C') {
             Self::Change {
@@ -74,7 +84,9 @@ impl ChangeRecord {
                 start: InputStart::Change { count: stored, .. },
                 ..
             } => *stored = Some(count),
-            Self::Input { repetitions, .. } => *repetitions = count,
+            Self::Input {
+                start, repetitions, ..
+            } => *repetitions = start.input_count(count),
         }
     }
 
@@ -101,21 +113,14 @@ impl ChangeRecord {
                 // Replay uses this descriptor again, not a recording of its
                 // expanded actions (which would multiply the next dot twice).
                 edit.take_input_actions();
-                if matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A')) {
+                if matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A' | 'o' | 'O')) {
                     let mut session = InputSession::new(edit, start.clone(), *repetitions)?;
                     for action in actions {
                         session.apply_input(action)?;
                     }
                     return session.commit(state);
                 }
-                for index in 0..*repetitions {
-                    if index > 0 {
-                        match start {
-                            InputStart::Insert('o') => edit.open_line_below()?,
-                            InputStart::Insert('O') => edit.open_line_above()?,
-                            _ => {}
-                        }
-                    }
+                for _ in 0..*repetitions {
                     for action in actions {
                         edit.apply_input(action)?;
                     }
