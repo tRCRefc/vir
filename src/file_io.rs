@@ -1,8 +1,10 @@
 //! File loading and staged saving for the shared editor.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use crate::buffer::TextBuffer;
 
@@ -12,47 +14,128 @@ pub fn load(path: &Path) -> io::Result<TextBuffer> {
     load_with_origin(path).map(|(buffer, _)| buffer)
 }
 
-/// Report whether bytes were loaded, so a new buffer cannot overwrite a file
-/// created by another process between opening and its first save.
-pub(crate) fn load_with_origin(path: &Path) -> io::Result<(TextBuffer, bool)> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
+/// A stable version of bytes read from one handle. Content is shared by editor
+/// transaction clones; exact comparison also detects timestamp-preserving edits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileVersion {
+    text: Arc<str>,
+    stamp: Stamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: SystemTime,
+    #[cfg(unix)]
+    identity: (u64, u64),
+}
+
+impl Stamp {
+    fn read(metadata: &fs::Metadata) -> io::Result<Self> {
+        Ok(Self {
+            len: metadata.len(),
+            modified: metadata.modified()?,
+            #[cfg(unix)]
+            identity: {
+                use std::os::unix::fs::MetadataExt;
+                (metadata.dev(), metadata.ino())
+            },
+        })
+    }
+}
+
+fn conflict() -> io::Error {
+    io::Error::other("file changed since loading or saving; reload or write to a new path")
+}
+
+pub(crate) fn load_with_origin(path: &Path) -> io::Result<(TextBuffer, Option<FileVersion>)> {
+    load_with(path, || Ok(()))
+}
+
+// The hook allows deterministic tests of replacement or rewriting during reads.
+fn load_with(
+    path: &Path,
+    after_read: impl FnOnce() -> io::Result<()>,
+) -> io::Result<(TextBuffer, Option<FileVersion>)> {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok((TextBuffer::default(), false));
+            return Ok((TextBuffer::default(), None));
         }
         Err(error) => return Err(error),
     };
-    TextBuffer::from_text(&text)
-        .map(|buffer| (buffer, true))
-        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))
+    let before = file.metadata()?;
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    after_read()?;
+    let after = file.metadata()?;
+    let named = fs::metadata(path)?;
+    if !same_destination(Some(&before), Some(&after))
+        || !same_destination(Some(&after), Some(&named))
+    {
+        return Err(conflict());
+    }
+    let buffer = TextBuffer::from_text(&text)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+    let version = FileVersion {
+        text: text.into(),
+        stamp: Stamp::read(&after)?,
+    };
+    Ok((buffer, Some(version)))
 }
 
+/// Low-level staged save without a previously loaded version. Editor saves use
+/// save_checked instead, to also protect changes made before saving starts.
 pub fn save(path: &Path, buffer: &TextBuffer) -> io::Result<()> {
     save_with(path, |file| file.write_all(buffer.to_text().as_bytes()))
 }
 
 /// Export without overwriting an existing destination, including symlinks.
 pub fn save_new(path: &Path, buffer: &TextBuffer) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut staged = tempfile::Builder::new()
-        .prefix(".vir-save-")
-        .tempfile_in(parent)?;
-    staged.write_all(buffer.to_text().as_bytes())?;
-    staged.as_file().sync_all()?;
-    staged
-        .persist_noclobber(path)
-        .map_err(|error| error.error)?;
+    save_checked(path, buffer, None).map(|_| ())
+}
+
+pub(crate) fn save_checked(
+    path: &Path,
+    buffer: &TextBuffer,
+    expected: Option<&FileVersion>,
+) -> io::Result<FileVersion> {
+    let text: Arc<str> = buffer.to_text().into();
+    let stamp = stage(path, Some(expected), |file| file.write_all(text.as_bytes()))?;
+    Ok(FileVersion { text, stamp })
+}
+
+fn save_with(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -> io::Result<()> {
+    stage(path, None, write).map(|_| ())
+}
+
+fn validate_version(path: &Path, expected: &FileVersion) -> io::Result<()> {
+    let (_, actual) = load_with_origin(path)?;
+    if actual.as_ref() != Some(expected) {
+        return Err(conflict());
+    }
     Ok(())
 }
 
-/// Stage all bytes in the destination directory before replacing a regular
-/// file. No fallible work follows publication: Ok means the new file is visible.
-/// File contents are synced, but directory crash durability is not guaranteed.
-fn save_with(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -> io::Result<()> {
+/// None means a low-level unguarded save; Some(None) requires a new path.
+/// No fallible work follows publication. The next version comes from the staged
+/// handle before rename (ctime is deliberately not part of the stable stamp).
+fn stage(
+    path: &Path,
+    expected: Option<Option<&FileVersion>>,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<Stamp> {
     let before = destination(path)?;
+    match expected {
+        Some(Some(version)) => validate_version(path, version)?,
+        Some(None) if before.is_some() => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "destination already exists",
+            ));
+        }
+        _ => {}
+    }
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -80,6 +163,10 @@ fn save_with(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -
         staged.as_file().set_permissions(metadata.permissions())?;
     }
     staged.as_file().sync_all()?;
+    let stamp = Stamp::read(&staged.as_file().metadata()?)?;
+    if let Some(Some(version)) = expected {
+        validate_version(path, version)?;
+    }
     let after = destination(path)?;
     if !same_destination(before.as_ref(), after.as_ref()) {
         return Err(io::Error::other("file changed during save"));
@@ -87,12 +174,11 @@ fn save_with(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -
     if before.is_some() {
         staged.persist(path).map_err(|error| error.error)?;
     } else {
-        // Never overwrite a file created by someone else while we were writing.
         staged
             .persist_noclobber(path)
             .map_err(|error| error.error)?;
     }
-    Ok(())
+    Ok(stamp)
 }
 
 fn destination(path: &Path) -> io::Result<Option<fs::Metadata>> {
@@ -168,6 +254,51 @@ fn same_destination(before: Option<&fs::Metadata>, after: Option<&fs::Metadata>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_rejects_changes_during_reading() {
+        for replace in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("text");
+            fs::write(&path, "original").unwrap();
+            let result = load_with(&path, || {
+                if replace {
+                    let replacement = dir.path().join("replacement");
+                    fs::write(&replacement, "original")?;
+                    fs::rename(replacement, &path)
+                } else {
+                    fs::write(&path, "changed length")
+                }
+            });
+            assert!(result.unwrap_err().to_string().contains("file changed"));
+        }
+    }
+
+    #[test]
+    fn guarded_save_rechecks_after_staging_and_cleans_up() {
+        for delete in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("text");
+            fs::write(&path, "original").unwrap();
+            let (_, version) = load_with_origin(&path).unwrap();
+            let result = stage(&path, Some(version.as_ref()), |file| {
+                file.write_all(b"local")?;
+                if delete {
+                    fs::remove_file(&path)
+                } else {
+                    fs::write(&path, "external")
+                }
+            });
+            assert!(result.unwrap_err().to_string().contains("file changed"));
+            assert_eq!(
+                fs::read_dir(dir.path()).unwrap().count(),
+                usize::from(!delete)
+            );
+            if !delete {
+                assert_eq!(fs::read_to_string(&path).unwrap(), "external");
+            }
+        }
+    }
 
     #[test]
     fn partial_write_failure_preserves_original_and_removes_temporary_file() {

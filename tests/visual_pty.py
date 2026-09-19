@@ -679,7 +679,58 @@ def repeat_session(directory):
         os.close(slave)
 
 
+def conflict_session(directory):
+    path = directory / "conflict"
+    export = directory / "conflict-export"
+    path.write_text("one two three\n")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 7, 180, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/1  col 1")
+        os.write(master, b"dw")
+        receive(master, b"[+]")
+        path.write_text("external\n")
+        os.write(master, b":wq\r")
+        receive(master, b"file changed since loading or saving")
+        assert process.poll() is None
+        assert path.read_text() == "external\n"
+        os.write(master, b"u")
+        receive(master, b"one two three")
+        os.write(master, b"u")
+        receive(master, b"two three")
+        os.write(master, b".")
+        receive(master, b"1/1  col 1")
+        os.write(master, f":w {export}\r".encode())
+        receive(master, b"Written")
+        assert export.read_text() == "three\n"
+        os.write(master, b":w\r")
+        receive(master, b"file changed since loading or saving")
+        os.write(master, b":e!\r")
+        receive(master, b"external")
+        os.write(master, b"A!")
+        receive(master, b"external!")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b":w\r")
+        receive(master, b"Written")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "external!\n"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    conflict_session(Path(directory))
     repeat_session(Path(directory))
     word_operator_session(Path(directory))
     word_session(Path(directory))

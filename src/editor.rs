@@ -18,7 +18,7 @@ pub struct Editor {
     current: Option<usize>,
     path: Option<PathBuf>,
     modified: bool,
-    path_writable: bool,
+    file_version: Option<file_io::FileVersion>,
     arguments: Vec<PathBuf>,
     argument_index: Option<usize>,
     warned_remaining: Option<usize>,
@@ -155,10 +155,10 @@ impl Editor {
         if self.modified && !force {
             return Err(io::Error::other("unsaved changes"));
         }
-        let (buffer, existed) = file_io::load_with_origin(path)?;
+        let (buffer, version) = file_io::load_with_origin(path)?;
         let mut loaded = Self::from_buffer(buffer);
         loaded.path = Some(path.to_owned());
-        loaded.path_writable = existed;
+        loaded.file_version = version;
         loaded.arguments = self.arguments.clone();
         loaded.argument_index = self.argument_index;
         loaded.warned_remaining = self.warned_remaining;
@@ -238,7 +238,7 @@ impl Editor {
     pub fn set_path(&mut self, path: &Path) {
         if self.path.as_deref() != Some(path) {
             self.path = Some(path.to_owned());
-            self.path_writable = false;
+            self.file_version = None;
         }
     }
 
@@ -296,16 +296,17 @@ impl Editor {
             selected = TextBuffer::from_text(&text).map_err(io::Error::other)?;
             &selected
         };
-        if current && self.path_writable {
-            file_io::save(&path, buffer)?;
+        let expected = if current {
+            self.file_version.as_ref()
         } else {
-            file_io::save_new(&path, buffer)?;
-        }
+            None
+        };
+        let version = file_io::save_checked(&path, buffer, expected)?;
         if self.path.is_none() {
             self.path = Some(path);
-            self.path_writable = true;
+            self.file_version = Some(version);
         } else if current {
-            self.path_writable = true;
+            self.file_version = Some(version);
         }
         // A full-buffer write clears modified even when exporting, like ex.
         if full {

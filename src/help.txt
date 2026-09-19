@@ -52,9 +52,12 @@ Behavior and limits:
   keeps complete input lines but discards an unterminated final input line.
 - Saves stage and sync a temporary file before publication. Links and
   unsupported permissions are rejected. ACLs/xattrs are not preserved;
-  directory crash durability and external-edit conflict protection are
-  not guaranteed. A newly opened missing target cannot overwrite a file
-  that appears before its first save.
+  directory crash durability is not guaranteed. Saves reject changes since
+  loading or the last save (content/mtime, plus file identity on Unix),
+  including deletion. Conflicts keep edits and wq stays open: reload with
+  e! to discard edits, or w NEW_PATH to export them. w! is not implemented.
+  A newly opened missing target cannot overwrite a file that appears before
+  its first save. The final check and publication still have a race window.
 - No full BRE compatibility, macros, next-with-new-list,
   substitution confirmation, multi-line replacement, or recovery yet.
 
