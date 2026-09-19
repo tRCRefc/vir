@@ -19,6 +19,7 @@ pub struct TextEdit<'a> {
     cursor: Position,
     undo_anchor: Position,
     crossed_lines: bool,
+    opened_at: Option<usize>,
     pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
@@ -35,6 +36,7 @@ impl Editor {
             cursor,
             undo_anchor: cursor,
             crossed_lines: false,
+            opened_at: None,
             replacements: Vec::new(),
             pending_register: None,
             input_actions: None,
@@ -236,7 +238,11 @@ impl TextEdit<'_> {
         } else {
             self.cursor.row + 1
         };
+        let pristine = self.draft == self.editor.buffer;
         self.draft.insert_lines(row, [""]).map_err(str::to_owned)?;
+        if pristine {
+            self.opened_at = Some(row);
+        }
         self.crossed_lines = true;
         self.cursor = Position { row, column: 0 };
         Ok(())
@@ -248,7 +254,11 @@ impl TextEdit<'_> {
         } else {
             self.cursor.row
         };
+        let pristine = self.draft == self.editor.buffer;
         self.draft.insert_lines(row, [""]).map_err(str::to_owned)?;
+        if pristine {
+            self.opened_at = Some(row);
+        }
         self.crossed_lines = true;
         self.cursor = Position { row, column: 0 };
         Ok(())
@@ -402,12 +412,26 @@ impl TextEdit<'_> {
                 && self.draft.has_trailing_newline() == original.has_trailing_newline()
                 && (0..original.line_count())
                     .all(|r| r == self.undo_anchor.row || self.draft.line(r) == original.line(r));
-            let anchor = single_line.then_some(self.undo_anchor);
+            let anchor = single_line.then_some(super::UndoLocation::Character(self.undo_anchor));
+            // Open-line input may include cross-boundary erase/delete extensions.
+            // Only publish insertion semantics when both original sides survive.
+            let opened = self.opened_at.and_then(|at| {
+                let added = self.draft.line_count().checked_sub(original.line_count())?;
+                (added > 0
+                    && at <= original.line_count()
+                    && (0..at).all(|r| original.line(r) == self.draft.line(r))
+                    && (at..original.line_count())
+                        .all(|r| original.line(r) == self.draft.line(r + added)))
+                .then_some(super::UndoLocation::Lines {
+                    next: at.saturating_sub(1),
+                    opposite: at,
+                })
+            });
             self.editor.edit(move |buffer| {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
-            self.editor.undo_location = anchor.map(super::UndoLocation::Character);
+            self.editor.undo_location = opened.or(anchor);
         }
         if let Some(register) = pending_register {
             self.editor.unnamed = Some(register);

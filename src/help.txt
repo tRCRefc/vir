@@ -157,7 +157,8 @@ commits the whole input session and returns to normal mode. Arrow keys
 are ignored during Insert. Normal x deletes a character; u (or :u)
 undoes/restores the last edit, including a whole Insert session.
 Normal u returns to the edit start for single-line character transactions.
-For whole-line d and line-register p/P, u targets the first restored line
+For whole-line d, line-register p/P and o/O that only add new lines,
+u targets the first restored line
 or the line before a removed block, at its first nonblank character.
 Other multiline edits keep prior placement; :u uses ex row/column 1.
 U restores the current line to its initial text for this visit, at column 1.

@@ -114,3 +114,73 @@ fn dot_publishes_fresh_line_targets_and_failed_commands_preserve_them() {
     state.undo(&mut editor).unwrap();
     assert_eq!((state.row, state.column), (0, 2));
 }
+
+#[test]
+fn open_line_input_uses_inserted_block_in_both_directions() {
+    for mode in ['o', 'O'] {
+        for typed in ["", "  X", "  X\n\tY"] {
+            let mut editor = editor("  first\n\tsecond\nlast");
+            let mut state = VisualState::default();
+            state.row = 1;
+            editor.set_current(1).unwrap();
+            let mut input = state.begin_counted_insert(&mut editor, mode, 3).unwrap();
+            input.paste(typed).unwrap();
+            input.commit(&mut state).unwrap();
+            let edited = editor.buffer().clone();
+            state.row = 0;
+            editor.set_current(0).unwrap();
+            state.undo(&mut editor).unwrap();
+            assert_eq!(
+                (state.row, state.column),
+                if mode == 'o' { (1, 1) } else { (0, 2) }
+            );
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer(), &edited);
+            assert_eq!(
+                (state.row, state.column),
+                (
+                    if mode == 'o' { 2 } else { 1 },
+                    if typed.is_empty() { 0 } else { 2 }
+                )
+            );
+        }
+    }
+}
+
+#[test]
+fn open_empty_and_unterminated_file_preserves_undo_text_and_dot_location() {
+    for text in ["", "  original", "  original\n"] {
+        for mode in ['o', 'O'] {
+            let mut editor = editor(text);
+            let mut state = VisualState::default();
+            let mut input = state.begin_counted_insert(&mut editor, mode, 1).unwrap();
+            input.paste(" X\nY").unwrap();
+            input.commit(&mut state).unwrap();
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer().to_text(), text);
+            assert_eq!(state.column, if text.is_empty() { 0 } else { 2 });
+            state.repeat_change(&mut editor, None).unwrap();
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer().to_text(), text);
+            state.undo(&mut editor).unwrap();
+            assert_eq!(state.column, 1);
+        }
+    }
+}
+
+#[test]
+fn open_that_changes_original_text_keeps_conservative_fallback() {
+    use vir::editor::InputAction;
+    let mut editor = editor("  first\n  second\nlast");
+    let mut state = VisualState::default();
+    state.row = 1;
+    editor.set_current(1).unwrap();
+    let mut input = state.begin_counted_insert(&mut editor, 'O', 1).unwrap();
+    input.apply_input(&InputAction::Delete).unwrap(); // merge original second into open line
+    input.apply_input(&InputAction::Delete).unwrap(); // remove an original space
+    input.paste("X\nY").unwrap();
+    input.commit(&mut state).unwrap();
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  first\n  second\nlast");
+    assert_eq!((state.row, state.column), (1, 0));
+}

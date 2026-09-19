@@ -311,6 +311,20 @@ def line_undo_cursor(session):
     session.save_exit(b"  one\n  two\nthree\n")
 
 
+def open_undo_cursor(session):
+    session.send(b"j3O  X\rY", b"[INSERT]")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"Gu", b"1/3  col 3")
+    session.send(b"u", b"2/5  col 3")
+    session.send(b":w\r", b"Written")
+    session.send(b"u", b"1/3  col 3")
+    session.send(b"j2o Z", b"[INSERT]")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"gu", b"2/3  col 3")
+    session.send(b"u", b"3/4  col 2")
+    session.save_exit(b"  one\n  two\n Z\nthree\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -328,10 +342,10 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
-        session = Session(directory, b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action == line_undo_cursor else b"abcdef\n")
+        session = Session(directory, b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")
         try:
             action(session)
         finally:
