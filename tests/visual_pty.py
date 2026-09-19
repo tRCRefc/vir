@@ -451,7 +451,7 @@ def line_actions_session(directory):
         receive(master, "ab中tail".encode())
         os.write(master, b"u")
         receive(master, b"abXYZ")
-        os.write(master, b"0r\x03r\r")
+        os.write(master, b"0r\x03r\x1b[3~")
         receive(master, b"replacement requires one character")
         os.write(master, "r文".encode())
         receive(master, "文bXYZ".encode())
@@ -752,7 +752,7 @@ def counted_replace_session(directory):
         send(b"l", b"col 4")
         send(b"3r\x03", b"[VIEW]")
         send(b"l", b"col 5")
-        send(b"2r\r", b"replacement requires one character")
+        send(b"2r\x1b[3~", b"replacement requires one character")
         send(b"l", b"col 6")
         # Overflow clears the prefix; subsequent r is uncounted.
         maximum = (1 << (struct.calcsize("P") * 8)) - 1

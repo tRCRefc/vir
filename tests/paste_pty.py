@@ -212,6 +212,40 @@ def quoted_input(session):
     session.save_exit(b"\x03\nYcdef\n")
 
 
+def special_r(session):
+    session.send(b"3r\t", b"col 3")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"\t\t\tdef\n"
+    session.send(b"u0", b"abcdef")
+    session.send(b"3r\r", b"2/2  col 1")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"\ndef\n"
+    session.send(b"2.", b"3/3  col 1")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"\n\nf\n"
+    session.send(b"3r", b"not enough characters")
+    session.send(b"g", b"1/3")
+    session.save_exit(b"\n\nf\n")
+
+
+def quoted_r(session):
+    session.send(b"3r\x16", b"quote: type one replacement character")
+    fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
+    receive(session.master, b"\x1b[6;1H")
+    session.send(b"\x00", b"quoted NUL is unsupported")
+    session.send(b"\x1b", b"^[^[^[def")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"\x1b\x1b\x1bdef\n"
+    session.send(b"u0", b"abcdef")
+    session.send(b"2r\x11\x03", b"^C^Ccdef")
+    session.send(b"l2.", b"^C^C^C^Cef")
+    session.send(b"u", b"^C^Ccdef")
+    session.send(b"0r\x16", b"quote: type one replacement character")
+    session.paste(b"ignored", b"nothing pasted")
+    session.send(b"rZ", b"Z^Ccdef")
+    session.save_exit(b"Z\x03cdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -229,7 +263,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"tail\n" if action == insert else b"abcdef\n")

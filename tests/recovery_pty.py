@@ -151,6 +151,8 @@ with tempfile.TemporaryDirectory(prefix="vir-recovery-test-") as temporary:
         (b"i\x16\x03", b"\x03alpha beta\n", b"^Calpha beta"),
         (b"R\x16\x08", b"\x08lpha beta\n", b"^Hlpha beta"),
         (b"iX\x16", b"Xalpha beta\n", b"quote: type one character"),
+        (b"3r\r", b"\nha beta\n", b"2/2  col 1"),
+        (b"2r\x16\x03", b"\x03\x03pha beta\n", b"^C^Cpha beta"),
         (b"RXY", b"XYpha beta\n", b"XYpha beta"),
         (b"cwnew", b"new beta\n", b"new beta"),
         (b"dw", b"beta\n", b"[+]"),

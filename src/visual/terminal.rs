@@ -1,5 +1,5 @@
 use super::input::InputSession;
-use super::input_keys::InputKeys;
+use super::input_keys::{InputKeys, ReplaceKey, ReplaceKeys};
 use super::keys::{NormalPrefix, PrefixAction, normal_motion};
 use super::operator::Operator;
 use super::paste::normalize;
@@ -288,7 +288,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
     let mut prefix = NormalPrefix::default();
-    let mut replace_pending = None;
+    let mut replace_pending: Option<ReplaceKeys> = None;
     let (mut width, mut height) = terminal::size()?;
     loop {
         if let Err(error) = recovery.observe(editor) {
@@ -389,20 +389,29 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
-                if let Some(count) = replace_pending.take() {
-                    if key.code == KeyCode::Esc
-                        || key
-                            .modifiers
-                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                    {
-                        continue;
-                    }
-                    if let KeyCode::Char(character) = key.code {
-                        if let Err(error) = state.replace_counted(editor, character, count) {
-                            command.message = Some(format!("? {error}"));
+                if let Some(mut pending) = replace_pending.take() {
+                    match pending.key(key) {
+                        Ok(ReplaceKey::Pending) => {
+                            if pending.is_quoted() {
+                                command.message =
+                                    Some("[VIEW] quote: type one replacement character".into());
+                            }
+                            replace_pending = Some(pending);
                         }
-                    } else {
-                        command.message = Some("? replacement requires one character".into());
+                        Ok(ReplaceKey::Cancel) => {}
+                        Ok(ReplaceKey::Character(character)) => {
+                            if let Err(error) =
+                                state.replace_counted(editor, character, pending.count)
+                            {
+                                command.message = Some(format!("? {error}"));
+                            }
+                        }
+                        Err(error) => {
+                            command.message = Some(format!("? {error}"));
+                            if pending.is_quoted() {
+                                replace_pending = Some(pending);
+                            }
+                        }
                     }
                     continue;
                 }
@@ -421,7 +430,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     }
                     Ok(PrefixAction::Replace(count)) => {
                         match state.replacement_end(editor, count) {
-                            Ok(_) => replace_pending = Some(count),
+                            Ok(_) => replace_pending = Some(ReplaceKeys::new(count)),
                             Err(error) => command.message = Some(format!("? {error}")),
                         }
                         continue;

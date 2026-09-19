@@ -131,8 +131,8 @@ impl VisualState {
         replacement: char,
         count: usize,
     ) -> Result<(), String> {
-        if replacement == '\n' || replacement == '\r' || replacement.is_control() {
-            return Err("replacement must be a printable character".into());
+        if replacement == '\0' || replacement == '\r' {
+            return Err("NUL and carriage return replacement are unsupported".into());
         }
         let count = count.max(1);
         let end = self.replacement_end(editor, count)?;
@@ -161,9 +161,14 @@ impl VisualState {
                 column: end,
             },
         )?;
-        edit.insert(&replacement.to_string().repeat(count))?;
-        edit.commit()?;
-        self.column = end - 1;
+        if replacement == '\n' {
+            edit.insert("\n")?;
+        } else {
+            edit.insert(&replacement.to_string().repeat(count))?;
+        }
+        let position = edit.commit()?;
+        self.row = position.row;
+        self.column = position.column.saturating_sub(1);
         self.preferred_column = self.column;
         self.last_change = Some(ChangeRecord::Replace {
             character: replacement,

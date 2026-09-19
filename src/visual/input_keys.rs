@@ -37,10 +37,7 @@ impl InputKeys {
             edit.apply_input(&action)?;
             return Ok(false);
         }
-        if matches!(key.code, KeyCode::Char('v' | 'q'))
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && !key.modifiers.contains(KeyModifiers::ALT)
-        {
+        if is_quote(key) {
             self.quoted = true;
             return Ok(false);
         }
@@ -50,6 +47,71 @@ impl InputKeys {
             insert_key(edit, key)
         }
     }
+}
+
+/// Pending normal-mode r, separate from the input-session quoting lifecycle.
+pub(super) struct ReplaceKeys {
+    pub(super) count: usize,
+    quoted: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ReplaceKey {
+    Pending,
+    Cancel,
+    Character(char),
+}
+
+impl ReplaceKeys {
+    pub(super) fn new(count: usize) -> Self {
+        Self {
+            count,
+            quoted: false,
+        }
+    }
+    pub(super) fn is_quoted(&self) -> bool {
+        self.quoted
+    }
+    pub(super) fn key(&mut self, key: KeyEvent) -> Result<ReplaceKey, String> {
+        if key.kind == KeyEventKind::Release {
+            return Ok(ReplaceKey::Pending);
+        }
+        if self.quoted {
+            return quoted_character(key).map(ReplaceKey::Character);
+        }
+        if is_quote(key) {
+            self.quoted = true;
+            return Ok(ReplaceKey::Pending);
+        }
+        if key.modifiers == KeyModifiers::CONTROL {
+            match key.code {
+                KeyCode::Char('j' | 'm') => return Ok(ReplaceKey::Character('\n')),
+                KeyCode::Char('i') => return Ok(ReplaceKey::Character('\t')),
+                _ => {}
+            }
+        }
+        if key.code == KeyCode::Esc
+            || key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return Ok(ReplaceKey::Cancel);
+        }
+        match key.code {
+            KeyCode::Enter => Ok(ReplaceKey::Character('\n')),
+            KeyCode::Tab => Ok(ReplaceKey::Character('\t')),
+            KeyCode::Char(c) if !c.is_control() => Ok(ReplaceKey::Character(c)),
+            _ => Err("replacement requires one character".into()),
+        }
+    }
+}
+
+fn is_quote(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('v' | 'q'))
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.intersects(
+            KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
+        )
 }
 
 fn quoted_character(key: KeyEvent) -> Result<char, String> {
@@ -139,6 +201,38 @@ mod tests {
     }
     fn editor() -> Editor {
         Editor::from_buffer(TextBuffer::from_text("abcdef").unwrap())
+    }
+
+    #[test]
+    fn replacement_quote_has_distinct_cancel_and_character_states() {
+        for event in [key(KeyCode::Esc), ctrl('c')] {
+            assert_eq!(ReplaceKeys::new(3).key(event).unwrap(), ReplaceKey::Cancel);
+            let mut pending = ReplaceKeys::new(3);
+            assert_eq!(pending.key(ctrl('v')).unwrap(), ReplaceKey::Pending);
+            assert_eq!(
+                pending.key(event).unwrap(),
+                ReplaceKey::Character(if event.code == KeyCode::Esc {
+                    '\x1b'
+                } else {
+                    '\x03'
+                })
+            );
+            assert_eq!(pending.count, 3);
+        }
+        let mut pending = ReplaceKeys::new(2);
+        pending.key(ctrl('q')).unwrap();
+        assert!(pending.key(ctrl(' ')).is_err());
+        assert!(pending.is_quoted());
+        assert!(pending.key(key(KeyCode::Left)).is_err());
+        assert_eq!(
+            pending.key(key(KeyCode::Tab)).unwrap(),
+            ReplaceKey::Character('\t')
+        );
+        assert_eq!(
+            ReplaceKeys::new(2).key(key(KeyCode::Enter)).unwrap(),
+            ReplaceKey::Character('\n')
+        );
+        assert!(ReplaceKeys::new(2).key(key(KeyCode::Delete)).is_err());
     }
 
     #[test]

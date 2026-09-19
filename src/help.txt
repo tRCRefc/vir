@@ -135,7 +135,9 @@ characters on the current line as one undo (3rX -> XXX, 3r0 -> 000).
 The cursor ends on the last replaced character. A short line is rejected
 before waiting for input; the count never crosses lines. Esc/Ctrl-C cancels
 pending r. Digits supplied after r are replacement text, not another count.
-Enter/Tab and quoted control-character replacement are not supported yet.
+Tab repeats count times; Enter/Ctrl-J replaces the range with one LF and
+moves to the next line at column 1. Ctrl-V/Ctrl-Q quotes the replacement,
+including Esc/Ctrl-C. Quoted NUL is rejected; Enter/CR become LF.
 Normal R enters [REPLACE]: each Unicode scalar overwrites one character,
 then appends at line end. Tab replaces one scalar; Enter splits the line.
 Backspace restores the previous Replace keystroke, including a split or
@@ -158,7 +160,7 @@ In Insert/change/R, Ctrl-V or Ctrl-Q quotes the next character: Esc and
 Ctrl-C become text; Enter/Ctrl-J/Ctrl-M split with LF. Quoted NUL is rejected.
 Resize preserves quoting; unsupported special keys keep waiting. Paste
 cancels pending quoting and is rejected. No numeric character-code input
-or literal CR; normal-mode r does not support quoting yet.
+or literal CR. Normal-mode r also supports quoting its replacement.
 . repeats the last successful visual text edit at the current cursor.
 It covers Insert/change/Replace sessions, d/dd/D/x, r, J and p/P. 3.
 replaces the saved count, rather than multiplying it; a successful counted
