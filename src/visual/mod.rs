@@ -54,6 +54,7 @@ impl VisualState {
             .min(editor.buffer().line_count() - 1);
         let register = crate::editor::Register::lines(editor.buffer(), self.row, end)?;
         editor.delete_lines(self.row, end)?;
+        editor.set_line_undo(self.row, self.row.saturating_sub(1));
         editor.unnamed = Some(register);
         self.row = editor.current().unwrap_or(0);
         self.column = 0;

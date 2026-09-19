@@ -3,9 +3,11 @@
 use std::io;
 mod register;
 mod text_edit;
+mod undo_location;
 pub use register::Register;
 use std::path::{Path, PathBuf};
 pub use text_edit::{InputAction, TextEdit};
+pub(crate) use undo_location::UndoLocation;
 
 use crate::buffer::TextBuffer;
 use crate::ex::address::{AddressError, LineRange};
@@ -24,7 +26,7 @@ pub struct Editor {
     warned_remaining: Option<usize>,
     last_search: Option<String>,
     undo: Option<(TextBuffer, Option<usize>)>,
-    undo_position: Option<crate::buffer::Position>,
+    undo_location: Option<UndoLocation>,
 }
 
 impl Editor {
@@ -123,15 +125,20 @@ impl Editor {
         let current = apply(&mut buffer).map_err(str::to_owned)?;
         let previous = std::mem::replace(&mut self.buffer, buffer);
         self.undo = Some((previous, self.current));
-        self.undo_position = None;
+        self.undo_location = None;
         self.current = current;
         self.modified = true;
         Ok(())
     }
 
-    /// Optional scalar edit anchor associated with the current undo pair.
-    pub(crate) fn undo_position(&self) -> Option<crate::buffer::Position> {
-        self.undo_position
+    /// Optional text location associated with the next direction of undo.
+    pub(crate) fn undo_location(&self) -> Option<UndoLocation> {
+        self.undo_location
+    }
+
+    /// Attach direction-specific rows after a successful visual whole-line edit.
+    pub(crate) fn set_line_undo(&mut self, next: usize, opposite: usize) {
+        self.undo_location = Some(UndoLocation::Lines { next, opposite });
     }
 
     /// Original ex undo is its own inverse; it is a change even if it restores
@@ -143,6 +150,9 @@ impl Editor {
             .ok_or_else(|| "nothing to undo".to_string())?;
         std::mem::swap(&mut self.buffer, buffer);
         std::mem::swap(&mut self.current, current);
+        if let Some(location) = &mut self.undo_location {
+            location.reverse();
+        }
         self.modified = true;
         Ok(())
     }

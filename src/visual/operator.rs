@@ -187,6 +187,7 @@ impl VisualState {
         match range {
             EditRange::Lines(start, end) => {
                 editor.delete_lines(start, end)?;
+                editor.set_line_undo(start, start.saturating_sub(1));
                 self.row = editor.current().unwrap_or(0);
                 self.column = 0;
             }
@@ -272,6 +273,7 @@ impl VisualState {
                     self.row + usize::from(!before)
                 };
                 editor.insert_lines(row, repeated)?;
+                editor.set_line_undo(row.saturating_sub(1), row);
                 // insert_lines places dot after the inserted block; visual put starts at its first line.
                 editor.set_current(row).map_err(|e| format!("{e:?}"))?;
                 self.row = row;

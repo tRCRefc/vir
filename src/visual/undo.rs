@@ -1,16 +1,28 @@
 //! Visual placement after shared undo; ex retains its own line-address semantics.
 use super::VisualState;
-use crate::editor::Editor;
+use crate::editor::{Editor, UndoLocation};
 
 impl VisualState {
     pub fn undo(&mut self, editor: &mut Editor) -> Result<(), String> {
-        let anchor = editor.undo_position();
+        let anchor = editor.undo_location();
         editor.undo()?;
-        self.row = anchor
-            .map_or_else(|| editor.current().unwrap_or(0), |p| p.row)
-            .min(editor.buffer().line_count().saturating_sub(1));
-        let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
-        self.column = anchor.map_or(0, |p| p.column).min(length.saturating_sub(1));
+        let row = match anchor {
+            Some(UndoLocation::Character(p)) => p.row,
+            Some(UndoLocation::Lines { next, .. }) => next,
+            None => editor.current().unwrap_or(0),
+        };
+        self.row = row.min(editor.buffer().line_count().saturating_sub(1));
+        let line = editor.buffer().line(self.row).unwrap_or("");
+        let length = line.chars().count();
+        self.column = match anchor {
+            Some(UndoLocation::Character(p)) => p.column,
+            Some(UndoLocation::Lines { .. }) => line
+                .chars()
+                .position(|c| c != ' ' && c != '\t')
+                .unwrap_or(length),
+            None => 0,
+        }
+        .min(length.saturating_sub(1));
         self.preferred_column = self.column;
         self.left = 0;
         self.top = self.top.min(self.row);

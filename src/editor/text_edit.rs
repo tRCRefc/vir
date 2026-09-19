@@ -407,7 +407,7 @@ impl TextEdit<'_> {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
-            self.editor.undo_position = anchor;
+            self.editor.undo_location = anchor.map(super::UndoLocation::Character);
         }
         if let Some(register) = pending_register {
             self.editor.unnamed = Some(register);
