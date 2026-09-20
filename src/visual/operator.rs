@@ -349,6 +349,10 @@ impl VisualState {
             )
         };
         let register = range.capture(editor)?;
+        let replaced_lines = match range {
+            EditRange::Lines(start, end) => Some((start, end)),
+            EditRange::Characters(..) => None,
+        };
         let (start, end) = match range {
             EditRange::Characters(start, end) => (start, end),
             EditRange::Lines(start, end) => (
@@ -363,6 +367,9 @@ impl VisualState {
             ),
         };
         let mut edit = editor.begin_text_edit(start)?;
+        if let Some((first, last)) = replaced_lines {
+            edit.record_line_replacement(first, last);
+        }
         edit.delete_range(start, end)?;
         edit.stage_register(register);
         edit.record_input();

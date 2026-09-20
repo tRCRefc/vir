@@ -162,6 +162,8 @@ u targets the first restored line
 or the line before a removed block, at its first nonblank character.
 Input expanding one original line into several targets the first restored
 line in both directions, at its first nonblank character.
+J and changes replacing multiple whole lines use the first restored line
+in both directions, at its first nonblank character.
 Other multiline edits keep prior placement; :u uses ex row/column 1.
 U restores the current line to its initial text for this visit, at column 1.
 Leaving the line, structural edits or successful :e/:d/:s reset that baseline.

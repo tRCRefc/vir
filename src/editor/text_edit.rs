@@ -21,6 +21,7 @@ pub struct TextEdit<'a> {
     crossed_lines: bool,
     opened_at: Option<usize>,
     input_row: Option<usize>,
+    replaced_lines: Option<(usize, usize)>,
     pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
@@ -39,6 +40,7 @@ impl Editor {
             crossed_lines: false,
             opened_at: None,
             input_row: None,
+            replaced_lines: None,
             replacements: Vec::new(),
             pending_register: None,
             input_actions: None,
@@ -219,6 +221,13 @@ impl TextEdit<'_> {
         self.pending_register = Some(register);
     }
 
+    /// A known whole-line replacement, before any draft changes are made.
+    pub(crate) fn record_line_replacement(&mut self, start: usize, end: usize) {
+        if start < end && self.draft == self.editor.buffer {
+            self.replaced_lines = Some((start, end));
+        }
+    }
+
     pub fn buffer(&self) -> &TextBuffer {
         &self.draft
     }
@@ -389,6 +398,7 @@ impl TextEdit<'_> {
             joined.push_str(next);
         }
         let last_column = self.draft.line(end).unwrap().chars().count();
+        self.record_line_replacement(row, end);
         self.draft
             .replace_text(
                 Position { row, column: 0 },
@@ -447,11 +457,24 @@ impl TextEdit<'_> {
                     opposite: at,
                 })
             });
+            let replaced = self.replaced_lines.and_then(|(start, end)| {
+                let suffix = original.line_count().checked_sub(end + 1)?;
+                let after = self.draft.line_count().checked_sub(suffix)?;
+                (after > start
+                    && self.draft.has_trailing_newline() == original.has_trailing_newline()
+                    && (0..start).all(|r| original.line(r) == self.draft.line(r))
+                    && (0..suffix)
+                        .all(|r| original.line(end + 1 + r) == self.draft.line(after + r)))
+                .then_some(super::UndoLocation::Lines {
+                    next: start,
+                    opposite: start,
+                })
+            });
             self.editor.edit(move |buffer| {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
-            self.editor.undo_location = opened.or(expanded).or(anchor);
+            self.editor.undo_location = replaced.or(opened).or(expanded).or(anchor);
         }
         if let Some(register) = pending_register {
             self.editor.unnamed = Some(register);
