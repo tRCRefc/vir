@@ -22,6 +22,7 @@ pub struct TextEdit<'a> {
     opened_at: Option<usize>,
     input_row: Option<usize>,
     replaced_lines: Option<(usize, usize)>,
+    initial_undo_column: Option<usize>,
     pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
@@ -41,6 +42,7 @@ impl Editor {
             opened_at: None,
             input_row: None,
             replaced_lines: None,
+            initial_undo_column: None,
             replacements: Vec::new(),
             pending_register: None,
             input_actions: None,
@@ -221,10 +223,19 @@ impl TextEdit<'_> {
         self.pending_register = Some(register);
     }
 
-    /// A known whole-line replacement, before any draft changes are made.
+    /// The original line range replaced by a command, before any draft changes.
     pub(crate) fn record_line_replacement(&mut self, start: usize, end: usize) {
-        if start < end && self.draft == self.editor.buffer {
+        if start <= end && end < self.editor.buffer.line_count() && self.draft == self.editor.buffer
+        {
             self.replaced_lines = Some((start, end));
+            self.initial_undo_column = None;
+        }
+    }
+
+    pub(crate) fn record_character_replacement(&mut self, start: Position, end: Position) {
+        if start.row < end.row && self.draft == self.editor.buffer {
+            self.record_line_replacement(start.row, end.row);
+            self.initial_undo_column = Some(start.column);
         }
     }
 
@@ -465,9 +476,14 @@ impl TextEdit<'_> {
                     && (0..start).all(|r| original.line(r) == self.draft.line(r))
                     && (0..suffix)
                         .all(|r| original.line(end + 1 + r) == self.draft.line(after + r)))
-                .then_some(super::UndoLocation::Lines {
-                    next: start,
-                    opposite: start,
+                .then_some(match self.initial_undo_column {
+                    Some(column) => {
+                        super::UndoLocation::InitialCharacter(Position { row: start, column })
+                    }
+                    None => super::UndoLocation::Lines {
+                        next: start,
+                        opposite: start,
+                    },
                 })
             });
             self.editor.edit(move |buffer| {

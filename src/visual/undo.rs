@@ -7,7 +7,7 @@ impl VisualState {
         let anchor = editor.undo_location();
         editor.undo()?;
         let row = match anchor {
-            Some(UndoLocation::Character(p)) => p.row,
+            Some(UndoLocation::Character(p) | UndoLocation::InitialCharacter(p)) => p.row,
             Some(UndoLocation::Lines { next, .. }) => next,
             None => editor.current().unwrap_or(0),
         };
@@ -15,7 +15,7 @@ impl VisualState {
         let line = editor.buffer().line(self.row).unwrap_or("");
         let length = line.chars().count();
         self.column = match anchor {
-            Some(UndoLocation::Character(p)) => p.column,
+            Some(UndoLocation::Character(p) | UndoLocation::InitialCharacter(p)) => p.column,
             Some(UndoLocation::Lines { .. }) => line
                 .chars()
                 .position(|c| c != ' ' && c != '\t')

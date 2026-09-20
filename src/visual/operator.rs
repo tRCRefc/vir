@@ -193,6 +193,7 @@ impl VisualState {
             }
             EditRange::Characters(start, end) => {
                 let mut edit = editor.begin_text_edit(start)?;
+                edit.record_character_replacement(start, end);
                 edit.delete_range(start, end)?;
                 edit.commit()?;
                 self.row = start.row;
@@ -255,6 +256,9 @@ impl VisualState {
                     row: self.row,
                     column,
                 })?;
+                if repeated.contains('\n') {
+                    edit.record_line_replacement(self.row, self.row);
+                }
                 edit.insert(&repeated)?;
                 self.finish_insert(edit.commit()?);
             }
@@ -368,7 +372,11 @@ impl VisualState {
         };
         let mut edit = editor.begin_text_edit(start)?;
         if let Some((first, last)) = replaced_lines {
-            edit.record_line_replacement(first, last);
+            if first < last {
+                edit.record_line_replacement(first, last);
+            }
+        } else {
+            edit.record_character_replacement(start, end);
         }
         edit.delete_range(start, end)?;
         edit.stage_register(register);

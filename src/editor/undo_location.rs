@@ -4,13 +4,25 @@ use crate::buffer::Position;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UndoLocation {
     Character(Position),
-    Lines { next: usize, opposite: usize },
+    /// Cross-line d/c preserve the range column only for the first undo.
+    InitialCharacter(Position),
+    Lines {
+        next: usize,
+        opposite: usize,
+    },
 }
 
 impl UndoLocation {
     pub(super) fn reverse(&mut self) {
-        if let Self::Lines { next, opposite } = self {
-            std::mem::swap(next, opposite);
+        match self {
+            Self::Lines { next, opposite } => std::mem::swap(next, opposite),
+            Self::InitialCharacter(p) => {
+                *self = Self::Lines {
+                    next: p.row,
+                    opposite: p.row,
+                };
+            }
+            Self::Character(_) => {}
         }
     }
 }

@@ -149,7 +149,7 @@ fn saved_join_and_mixed_undo_apis_keep_visual_targets_and_preferred_column() {
 }
 
 #[test]
-fn canceled_change_and_cross_boundary_input_do_not_publish_range_targets() {
+fn canceled_change_and_cross_boundary_input_preserve_appropriate_targets() {
     let original = "first\n  abc\n def\nlast";
     let (mut editor, mut state) = setup(original, 1, 0);
     state.replace_character(&mut editor, 'X').unwrap();
@@ -174,6 +174,9 @@ fn canceled_change_and_cross_boundary_input_do_not_publish_range_targets() {
             .unwrap();
         state.undo(&mut editor).unwrap();
         assert_eq!(editor.buffer().to_text(), original);
-        assert_eq!((state.row, state.column), (1, 0));
+        assert_eq!(
+            (state.row, state.column),
+            (1, if motion.is_some() { 2 } else { 0 })
+        );
     }
 }

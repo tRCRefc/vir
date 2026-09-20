@@ -844,6 +844,44 @@ def counted_insert_session(directory):
         os.close(slave)
 
 
+def cross_line_undo_session(directory):
+    path = directory / "cross-line-undo"
+    path.write_text("first\n  abc\n  def\nlast")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 80, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/4  col 1")
+        for keys, position in [
+            (b"j4ld2$", b"2/3  col 4"),
+            (b"Gu", b"2/4  col 5"),
+            (b"Gu", b"2/3  col 3"),
+            (b"Gu", b"2/4  col 3"),
+            (b"2lc2$X\rY\x1b", b"3/4  col 1"),
+            (b"Gu", b"2/4  col 5"),
+            (b"Gu", b"2/4  col 3"),
+            (b"Gu", b"2/4  col 3"),
+            (b"G0P", b"5/5  col 5"),
+            (b"Gu", b"4/4  col 1"),
+            (b"Gu", b"4/5  col 1"),
+        ]:
+            os.write(master, keys)
+            receive(master, position)
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "first\n  abc\n  def\nc\n  deflast"
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 def line_replacement_undo_session(directory):
     path = directory / "line-replacement-undo"
     path.write_text("first\n  abc\n def\nlast")
@@ -925,6 +963,7 @@ def multiline_input_undo_session(directory):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    cross_line_undo_session(Path(directory))
     line_replacement_undo_session(Path(directory))
     multiline_input_undo_session(Path(directory))
     counted_insert_session(Path(directory))
