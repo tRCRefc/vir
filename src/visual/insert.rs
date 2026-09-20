@@ -151,6 +151,9 @@ impl VisualState {
             row: self.row,
             column: self.column,
         })?;
+        if replacement == '\n' {
+            edit.record_line_replacement(self.row, self.row);
+        }
         edit.delete_range(
             Position {
                 row: self.row,

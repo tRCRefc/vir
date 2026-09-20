@@ -162,7 +162,8 @@ u targets the first restored line
 or the line before a removed block, at its first nonblank character.
 Input expanding one original line into several targets the first restored
 line in both directions, at its first nonblank character.
-J and changes replacing multiple whole lines use the first restored line
+Newline r replacements, J and changes replacing multiple whole lines
+use the first restored line
 in both directions, at its first nonblank character.
 Cross-line character d/c use the range column on the first undo only;
 later toggles use the first nonblank of the first restored line. Multiline
