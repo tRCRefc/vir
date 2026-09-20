@@ -20,6 +20,7 @@ pub struct TextEdit<'a> {
     undo_anchor: Position,
     crossed_lines: bool,
     opened_at: Option<usize>,
+    input_row: Option<usize>,
     pending_register: Option<super::Register>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
@@ -37,6 +38,7 @@ impl Editor {
             undo_anchor: cursor,
             crossed_lines: false,
             opened_at: None,
+            input_row: None,
             replacements: Vec::new(),
             pending_register: None,
             input_actions: None,
@@ -54,6 +56,9 @@ impl TextEdit<'_> {
     }
 
     pub(crate) fn record_input(&mut self) {
+        // Only single-original-line input has the VCHNG -> VMANYINS rule.
+        self.input_row =
+            (!self.crossed_lines && !self.editor.buffer.is_empty()).then_some(self.undo_anchor.row);
         self.input_actions = Some(Vec::new());
     }
 
@@ -427,11 +432,26 @@ impl TextEdit<'_> {
                     opposite: at,
                 })
             });
+            // The first LF saves the original line. Both undo directions
+            // restore a nonempty block, so both target its first line.
+            let expanded = self.input_row.and_then(|at| {
+                let added = self.draft.line_count().checked_sub(original.line_count())?;
+                (added > 0
+                    && at < original.line_count()
+                    && self.draft.has_trailing_newline() == original.has_trailing_newline()
+                    && (0..at).all(|r| original.line(r) == self.draft.line(r))
+                    && (at + 1..original.line_count())
+                        .all(|r| original.line(r) == self.draft.line(r + added)))
+                .then_some(super::UndoLocation::Lines {
+                    next: at,
+                    opposite: at,
+                })
+            });
             self.editor.edit(move |buffer| {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
-            self.editor.undo_location = opened.or(anchor);
+            self.editor.undo_location = opened.or(expanded).or(anchor);
         }
         if let Some(register) = pending_register {
             self.editor.unnamed = Some(register);
