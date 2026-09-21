@@ -51,82 +51,86 @@ impl NormalPrefix {
                 PrefixAction::Pass
             });
         }
-        if let KeyCode::Char(c @ '0'..='9') = key.code
-            && (c != '0' || self.digits != 0)
-        {
-            let next = self
-                .digits
-                .checked_mul(10)
-                .and_then(|n| n.checked_add((c as u8 - b'0') as usize));
-            if let Some(next) = next {
+        if let Some(result) = self.digit_key(key) {
+            return result;
+        }
+        if let Some(result) = self.operator_key(key) {
+            return result;
+        }
+        if self.operator_count.is_some() {
+            return self.finish_operator(key);
+        }
+        self.command_key(key, active)
+    }
+
+    fn digit_key(&mut self, key: KeyEvent) -> Option<Result<PrefixAction, &'static str>> {
+        let KeyCode::Char(c @ '0'..='9') = key.code else {
+            return None;
+        };
+        if c == '0' && self.digits == 0 {
+            return None;
+        }
+        let next = self
+            .digits
+            .checked_mul(10)
+            .and_then(|n| n.checked_add((c as u8 - b'0') as usize));
+        Some(match next {
+            Some(next) => {
                 self.digits = next;
-                return Ok(PrefixAction::Pending);
+                Ok(PrefixAction::Pending)
             }
-            *self = Self::default();
-            return Err("count too large");
-        }
-        if let KeyCode::Char(c) = key.code
-            && let Some(requested) = Operator::from_key(c)
-        {
-            if let Some(before) = self.operator_count {
-                let operator = self.operator.unwrap();
-                let matches_operator = requested == operator;
-                let count = before.max(1).checked_mul(self.digits.max(1));
+            None => {
                 *self = Self::default();
-                if !matches_operator {
-                    return Err("mixed operators; command cancelled");
-                }
-                return count
-                    .map(|n| PrefixAction::Operate(operator, None, Some(n)))
-                    .ok_or("count too large");
+                Err("count too large")
             }
-            self.operator = Some(requested);
-            self.operator_count = Some(self.digits);
-            self.digits = 0;
-            return Ok(PrefixAction::Pending);
-        }
+        })
+    }
+
+    fn operator_key(&mut self, key: KeyEvent) -> Option<Result<PrefixAction, &'static str>> {
+        let KeyCode::Char(c) = key.code else {
+            return None;
+        };
+        let requested = Operator::from_key(c)?;
         if let Some(before) = self.operator_count {
-            let count = before.max(1).checked_mul(self.digits.max(1));
-            let explicit = before != 0 || self.digits != 0;
             let operator = self.operator.unwrap();
+            let count = before.max(1).checked_mul(self.digits.max(1));
             *self = Self::default();
-            let count = count.ok_or("count too large")?;
-            if let Some(motion) = normal_motion(key).filter(|motion| motion.supports_operator()) {
-                return Ok(PrefixAction::Operate(
-                    operator,
-                    Some(motion),
-                    explicit.then_some(count),
-                ));
-            }
-            return Err("unsupported operator motion; command cancelled");
+            return Some(if requested != operator {
+                Err("mixed operators; command cancelled")
+            } else {
+                count
+                    .map(|n| PrefixAction::Operate(operator, None, Some(n)))
+                    .ok_or("count too large")
+            });
         }
-        if let KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R')) = key.code {
-            let count = self.digits.max(1);
-            *self = Self::default();
-            if InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
-                return Err("input repeat too large");
-            }
-            return Ok(PrefixAction::Insert(mode, count));
+        self.operator = Some(requested);
+        self.operator_count = Some(self.digits);
+        self.digits = 0;
+        Some(Ok(PrefixAction::Pending))
+    }
+
+    fn finish_operator(&mut self, key: KeyEvent) -> Result<PrefixAction, &'static str> {
+        let before = self.operator_count.unwrap();
+        let count = before.max(1).checked_mul(self.digits.max(1));
+        let explicit = before != 0 || self.digits != 0;
+        let operator = self.operator.unwrap();
+        *self = Self::default();
+        let count = count.ok_or("count too large")?;
+        normal_motion(key)
+            .filter(|motion| motion.supports_operator())
+            .map(|motion| PrefixAction::Operate(operator, Some(motion), explicit.then_some(count)))
+            .ok_or("unsupported operator motion; command cancelled")
+    }
+
+    fn command_key(&mut self, key: KeyEvent, active: bool) -> Result<PrefixAction, &'static str> {
+        if let Some(result) = self.input_command(key) {
+            return result;
         }
-        if key.code == KeyCode::Char('r') {
-            let count = self.digits.max(1);
-            *self = Self::default();
-            return Ok(PrefixAction::Replace(count));
+        if let Some(result) = self.repeat_command(key) {
+            return result;
         }
-        if key.code == KeyCode::Char('.') {
-            let count = (self.digits != 0).then_some(self.digits);
-            *self = Self::default();
-            return Ok(PrefixAction::Repeat(count));
-        }
-        if matches!(key.code, KeyCode::Char('p' | 'P')) {
-            let count = self.digits.max(1);
-            *self = Self::default();
-            return Ok(PrefixAction::Put(key.code == KeyCode::Char('P'), count));
-        }
-        if key.code == KeyCode::Char('J') && self.operator_count.is_none() {
-            let count = self.digits.max(2);
-            *self = Self::default();
-            return Ok(PrefixAction::Join(count));
+        if let Some(result) = self.join_command(key) {
+            return result;
         }
         *self = Self::default();
         if active {
@@ -134,6 +138,44 @@ impl NormalPrefix {
         } else {
             Ok(PrefixAction::Pass)
         }
+    }
+
+    fn input_command(&mut self, key: KeyEvent) -> Option<Result<PrefixAction, &'static str>> {
+        let mode = match key.code {
+            KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R')) => mode,
+            KeyCode::Char('r') => 'r',
+            _ => return None,
+        };
+        let count = self.digits.max(1);
+        *self = Self::default();
+        Some(if mode == 'r' {
+            Ok(PrefixAction::Replace(count))
+        } else if InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
+            Err("input repeat too large")
+        } else {
+            Ok(PrefixAction::Insert(mode, count))
+        })
+    }
+
+    fn repeat_command(&mut self, key: KeyEvent) -> Option<Result<PrefixAction, &'static str>> {
+        let action = match key.code {
+            KeyCode::Char('.') => PrefixAction::Repeat((self.digits != 0).then_some(self.digits)),
+            KeyCode::Char('p' | 'P') => {
+                PrefixAction::Put(key.code == KeyCode::Char('P'), self.digits.max(1))
+            }
+            _ => return None,
+        };
+        *self = Self::default();
+        Some(Ok(action))
+    }
+
+    fn join_command(&mut self, key: KeyEvent) -> Option<Result<PrefixAction, &'static str>> {
+        if key.code != KeyCode::Char('J') {
+            return None;
+        }
+        let count = self.digits.max(2);
+        *self = Self::default();
+        Some(Ok(PrefixAction::Join(count)))
     }
 }
 
