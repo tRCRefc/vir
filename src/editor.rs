@@ -1,6 +1,6 @@
 //! Shared ex/visual state. Frontends cannot independently mutate its text or dot.
 
-use std::io;
+use std::{borrow::Cow, io};
 mod register;
 mod text_edit;
 mod undo_location;
@@ -283,18 +283,7 @@ impl Editor {
         destination: Option<&Path>,
         range: Option<LineRange>,
     ) -> io::Result<()> {
-        let full = match range {
-            None => true,
-            Some(range) => {
-                if range.start > range.end || range.end >= self.buffer.line_count() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "invalid write range",
-                    ));
-                }
-                range.start == 0 && range.end + 1 == self.buffer.line_count()
-            }
-        };
+        let (full, buffer) = self.write_selection(range)?;
         let path = destination
             .or(self.path())
             .ok_or_else(|| io::Error::other("no file name"))?
@@ -305,27 +294,12 @@ impl Editor {
                 "cannot write partial buffer to current file",
             ));
         }
-        let selected;
-        let buffer = if full {
-            &self.buffer
-        } else {
-            let range = range.expect("partial write has a range");
-            let mut text = String::new();
-            for index in range.start..=range.end {
-                text.push_str(self.buffer.line(index).expect("validated range"));
-                if index + 1 < self.buffer.line_count() || self.buffer.has_trailing_newline() {
-                    text.push('\n');
-                }
-            }
-            selected = TextBuffer::from_text(&text).map_err(io::Error::other)?;
-            &selected
-        };
         let expected = if current {
             self.file_version.as_ref()
         } else {
             None
         };
-        let version = file_io::save_checked(&path, buffer, expected)?;
+        let version = file_io::save_checked(&path, &buffer, expected)?;
         if self.path.is_none() {
             self.path = Some(path);
             self.file_version = Some(version);
@@ -337,6 +311,30 @@ impl Editor {
             self.modified = false;
         }
         Ok(())
+    }
+
+    fn write_selection(&self, range: Option<LineRange>) -> io::Result<(bool, Cow<'_, TextBuffer>)> {
+        let Some(range) = range else {
+            return Ok((true, Cow::Borrowed(&self.buffer)));
+        };
+        if range.start > range.end || range.end >= self.buffer.line_count() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid write range",
+            ));
+        }
+        if range.start == 0 && range.end + 1 == self.buffer.line_count() {
+            return Ok((true, Cow::Borrowed(&self.buffer)));
+        }
+        let mut text = String::new();
+        for index in range.start..=range.end {
+            text.push_str(self.buffer.line(index).expect("validated range"));
+            if index + 1 < self.buffer.line_count() || self.buffer.has_trailing_newline() {
+                text.push('\n');
+            }
+        }
+        let selected = TextBuffer::from_text(&text).map_err(io::Error::other)?;
+        Ok((false, Cow::Owned(selected)))
     }
 }
 

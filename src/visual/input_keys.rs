@@ -41,11 +41,7 @@ impl InputKeys {
             self.quoted = true;
             return Ok(false);
         }
-        if replace {
-            replace_key(edit, key)
-        } else {
-            insert_key(edit, key)
-        }
+        edit_key(edit, replace, key)
     }
 }
 
@@ -148,45 +144,60 @@ fn quoted_character(key: KeyEvent) -> Result<char, String> {
     }
 }
 
-fn insert_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
-    match key.code {
-        KeyCode::Esc => return Ok(true),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
-        KeyCode::Backspace => edit.apply_input(&InputAction::Backspace)?,
-        KeyCode::Delete => edit.apply_input(&InputAction::Delete)?,
-        KeyCode::Enter => edit.apply_input(&InputAction::Insert("\n".into()))?,
-        KeyCode::Tab => edit.apply_input(&InputAction::Insert("\t".into()))?,
-        KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && !c.is_control() =>
-        {
-            edit.apply_input(&InputAction::Insert(c.to_string()))?
-        }
-        _ => {}
+fn edit_key(edit: &mut impl InputTarget, replace: bool, key: KeyEvent) -> Result<bool, String> {
+    if key.code == KeyCode::Esc
+        || matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL)
+    {
+        return Ok(true);
+    }
+    if let Some(action) = action_for_key(replace, key) {
+        edit.apply_input(&action)?;
     }
     Ok(false)
 }
 
-fn replace_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
+fn action_for_key(replace: bool, key: KeyEvent) -> Option<InputAction> {
     match key.code {
-        KeyCode::Esc => return Ok(true),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
-        KeyCode::Backspace => edit.apply_input(&InputAction::RestoreReplacement)?,
-        KeyCode::Enter => edit.apply_input(&InputAction::Replace('\n'))?,
-        KeyCode::Tab => edit.apply_input(&InputAction::Replace('\t'))?,
+        KeyCode::Backspace => Some(if replace {
+            InputAction::RestoreReplacement
+        } else {
+            InputAction::Backspace
+        }),
+        KeyCode::Delete if !replace => Some(InputAction::Delete),
+        KeyCode::Enter => Some(if replace {
+            InputAction::Replace('\n')
+        } else {
+            InputAction::Insert("\n".into())
+        }),
+        KeyCode::Tab => Some(if replace {
+            InputAction::Replace('\t')
+        } else {
+            InputAction::Insert("\t".into())
+        }),
         KeyCode::Char(c)
             if !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 && !c.is_control() =>
         {
-            edit.apply_input(&InputAction::Replace(c))?
+            Some(if replace {
+                InputAction::Replace(c)
+            } else {
+                InputAction::Insert(c.to_string())
+            })
         }
-        _ => {}
+        _ => None,
     }
-    Ok(false)
+}
+
+#[cfg(test)]
+fn insert_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
+    edit_key(edit, false, key)
+}
+
+#[cfg(test)]
+fn replace_key(edit: &mut impl InputTarget, key: KeyEvent) -> Result<bool, String> {
+    edit_key(edit, true, key)
 }
 
 #[cfg(test)]

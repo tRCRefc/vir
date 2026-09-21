@@ -52,6 +52,47 @@ struct CommandLine {
     input_error: Option<String>,
 }
 
+fn editor_title(editor: &Editor) -> String {
+    editor
+        .path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "[No file]".into())
+}
+
+fn editor_name(editor: &Editor) -> String {
+    let name = editor_title(editor);
+    if editor.is_modified() {
+        format!("[+] {name}")
+    } else {
+        name
+    }
+}
+
+fn draw_frame<W: Write>(
+    output: &mut W,
+    frame: &super::Frame,
+    height: u16,
+    status: &str,
+    cursor: Option<(u16, u16)>,
+) -> io::Result<()> {
+    queue!(
+        output,
+        cursor::Hide,
+        cursor::MoveTo(0, 0),
+        Clear(ClearType::All)
+    )?;
+    for (row, line) in frame.lines.iter().enumerate() {
+        queue!(output, cursor::MoveTo(0, row as u16), Print(line))?;
+    }
+    if height > 0 {
+        queue!(output, cursor::MoveTo(0, height - 1), Print(status))?;
+    }
+    if let Some((x, y)) = cursor {
+        queue!(output, cursor::MoveTo(x, y), cursor::Show)?;
+    }
+    output.flush()
+}
+
 impl CommandLine {
     fn execute(&mut self, text: &str, editor: &mut Editor, state: &mut VisualState) -> bool {
         let result = state.execute_ex(text, editor);
@@ -111,25 +152,37 @@ impl CommandLine {
 
     fn display(&self, width: u16) -> Option<(String, Option<u16>)> {
         let columns = usize::from(width.saturating_sub(1));
-        if let Some(error) = &self.input_error {
-            return Some((clip(&format!("? {error}"), 0, columns), None));
+        if self.input_error.is_some() {
+            return self.display_error(columns);
         }
         if let Some(input) = &self.input {
-            let prefix = self
-                .search_direction
-                .map_or(':', |forward| if forward { '/' } else { '?' });
-            let text = format!("{prefix}{input}");
-            let end = screen_column(&text, text.chars().count());
-            let left = end.saturating_sub(columns.saturating_sub(1));
-            Some((
-                clip(&text, left, columns),
-                (columns > 0).then_some((end - left) as u16),
-            ))
-        } else {
-            self.message
-                .as_ref()
-                .map(|text| (clip(text, 0, columns), None))
+            return Some(self.display_input(input, columns));
         }
+        self.display_message(columns)
+    }
+
+    fn display_error(&self, columns: usize) -> Option<(String, Option<u16>)> {
+        let error = self.input_error.as_ref()?;
+        Some((clip(&format!("? {error}"), 0, columns), None))
+    }
+
+    fn display_input(&self, input: &str, columns: usize) -> (String, Option<u16>) {
+        let prefix = self
+            .search_direction
+            .map_or(':', |forward| if forward { '/' } else { '?' });
+        let text = format!("{prefix}{input}");
+        let end = screen_column(&text, text.chars().count());
+        let left = end.saturating_sub(columns.saturating_sub(1));
+        (
+            clip(&text, left, columns),
+            (columns > 0).then_some((end - left) as u16),
+        )
+    }
+
+    fn display_message(&self, columns: usize) -> Option<(String, Option<u16>)> {
+        self.message
+            .as_ref()
+            .map(|text| (clip(text, 0, columns), None))
     }
 }
 
@@ -220,22 +273,7 @@ fn input_session(
                 );
             }
             let mut output = io::stdout().lock();
-            queue!(
-                output,
-                cursor::Hide,
-                cursor::MoveTo(0, 0),
-                Clear(ClearType::All)
-            )?;
-            for (row, line) in frame.lines.iter().enumerate() {
-                queue!(output, cursor::MoveTo(0, row as u16), Print(line))?;
-            }
-            if *height > 0 {
-                queue!(output, cursor::MoveTo(0, *height - 1), Print(frame.status))?;
-            }
-            if let Some((x, y)) = frame.cursor {
-                queue!(output, cursor::MoveTo(x, y), cursor::Show)?;
-            }
-            output.flush()?;
+            draw_frame(&mut output, &frame, *height, &frame.status, frame.cursor)?;
             drop(output);
             match read_event(*width, *height)? {
                 Event::Resize(w, h) => {
@@ -294,15 +332,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
         if let Err(error) = recovery.observe(editor) {
             command.message = Some(format!("? recovery unavailable: {error}"));
         }
-        let name = editor
-            .path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "[No file]".into());
-        let name = if editor.is_modified() {
-            format!("[+] {name}")
-        } else {
-            name
-        };
+        let name = editor_name(editor);
         let frame = state.frame(editor.buffer(), &name, width, height);
         if !editor.buffer().is_empty() {
             editor
@@ -310,27 +340,6 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 .map_err(|e| io::Error::other(format!("{e:?}")))?;
         }
         state.checkpoint_line(editor);
-        let mut output = io::stdout().lock();
-        queue!(
-            output,
-            cursor::Hide,
-            cursor::MoveTo(0, 0),
-            Clear(ClearType::All)
-        )?;
-        for (row, line) in frame.lines.iter().enumerate() {
-            queue!(output, cursor::MoveTo(0, row as u16), Print(line))?;
-        }
-        if height > 0 {
-            queue!(
-                output,
-                cursor::MoveTo(0, height - 1),
-                Print(
-                    command
-                        .display(width)
-                        .map_or(frame.status, |(text, _)| text)
-                )
-            )?;
-        }
         let cursor = if command.input.is_some() {
             command
                 .display(width)
@@ -340,10 +349,11 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
         } else {
             frame.cursor
         };
-        if let Some((x, y)) = cursor {
-            queue!(output, cursor::MoveTo(x, y), cursor::Show)?;
-        }
-        output.flush()?;
+        let status = command
+            .display(width)
+            .map_or_else(|| frame.status.clone(), |(text, _)| text);
+        let mut output = io::stdout().lock();
+        draw_frame(&mut output, &frame, height, &status, cursor)?;
         drop(output);
         // Some terminal environments do not deliver resize events reliably.
         // Check dimensions while idle as well, including during command input.
@@ -455,10 +465,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Change, motion, count)) => {
-                        let name = editor
-                            .path()
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "[No file]".into());
+                        let name = editor_title(editor);
                         match state.begin_change(editor, motion, count) {
                             Ok(edit) => input_session(
                                 InputSession::new(edit, InputStart::Change { motion, count }, 1)
