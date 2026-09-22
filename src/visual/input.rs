@@ -251,7 +251,13 @@ impl<'a> InputSession<'a> {
             return Ok(());
         }
         self.work = work.unwrap_or(usize::MAX);
-        if erase_insert.is_some() {
+        self.record_action(action, erase_insert.is_some());
+        Ok(())
+    }
+
+    /// Keep the replay recipe normalized without mixing it into text editing.
+    fn record_action(&mut self, action: &InputAction, erased_insert: bool) {
+        if erased_insert {
             if let Some(InputAction::Insert(previous) | InputAction::ReplaceText(previous)) =
                 self.actions.last_mut()
             {
@@ -260,7 +266,7 @@ impl<'a> InputSession<'a> {
                     self.actions.pop();
                 }
             }
-            return Ok(());
+            return;
         }
         match (self.actions.last_mut(), action) {
             (Some(InputAction::Insert(previous)), InputAction::Insert(text))
@@ -269,7 +275,6 @@ impl<'a> InputSession<'a> {
             }
             _ => self.actions.push(action.clone()),
         }
-        Ok(())
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
