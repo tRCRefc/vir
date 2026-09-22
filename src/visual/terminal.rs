@@ -68,13 +68,7 @@ fn editor_name(editor: &Editor) -> String {
     }
 }
 
-fn draw_frame<W: Write>(
-    output: &mut W,
-    frame: &super::Frame,
-    height: u16,
-    status: &str,
-    cursor: Option<(u16, u16)>,
-) -> io::Result<()> {
+fn draw_frame<W: Write>(output: &mut W, frame: &super::Frame, height: u16) -> io::Result<()> {
     queue!(
         output,
         cursor::Hide,
@@ -85,9 +79,9 @@ fn draw_frame<W: Write>(
         queue!(output, cursor::MoveTo(0, row as u16), Print(line))?;
     }
     if height > 0 {
-        queue!(output, cursor::MoveTo(0, height - 1), Print(status))?;
+        queue!(output, cursor::MoveTo(0, height - 1), Print(&frame.status))?;
     }
-    if let Some((x, y)) = cursor {
+    if let Some((x, y)) = frame.cursor {
         queue!(output, cursor::MoveTo(x, y), cursor::Show)?;
     }
     output.flush()
@@ -139,6 +133,30 @@ impl CommandLine {
         }
     }
 
+    /// Handle one key while command or search input is active.
+    /// Returns true when the command requests leaving visual mode.
+    fn handle_event(
+        &mut self,
+        key: KeyEvent,
+        editor: &mut Editor,
+        state: &mut VisualState,
+    ) -> bool {
+        self.input_error = None;
+        if key.code != KeyCode::Enter {
+            self.key(key);
+            return false;
+        }
+        let text = self.input.take().unwrap();
+        if let Some(forward) = self.search_direction {
+            if let Err(error) = state.search(editor, &text, forward) {
+                self.message = Some(format!("? {error}"));
+            }
+        } else if !text.trim().is_empty() && self.execute(&text, editor, state) {
+            return true;
+        }
+        false
+    }
+
     fn paste(&mut self, text: &str) {
         let result = normalize(text).and_then(|text| {
             if text.chars().any(|c| c.is_control() && c != '\t') {
@@ -152,18 +170,15 @@ impl CommandLine {
 
     fn display(&self, width: u16) -> Option<(String, Option<u16>)> {
         let columns = usize::from(width.saturating_sub(1));
-        if self.input_error.is_some() {
-            return self.display_error(columns);
+        if let Some(error) = &self.input_error {
+            return Some((clip(&format!("? {error}"), 0, columns), None));
         }
         if let Some(input) = &self.input {
             return Some(self.display_input(input, columns));
         }
-        self.display_message(columns)
-    }
-
-    fn display_error(&self, columns: usize) -> Option<(String, Option<u16>)> {
-        let error = self.input_error.as_ref()?;
-        Some((clip(&format!("? {error}"), 0, columns), None))
+        self.message
+            .as_ref()
+            .map(|text| (clip(text, 0, columns), None))
     }
 
     fn display_input(&self, input: &str, columns: usize) -> (String, Option<u16>) {
@@ -177,12 +192,6 @@ impl CommandLine {
             clip(&text, left, columns),
             (columns > 0).then_some((end - left) as u16),
         )
-    }
-
-    fn display_message(&self, columns: usize) -> Option<(String, Option<u16>)> {
-        self.message
-            .as_ref()
-            .map(|text| (clip(text, 0, columns), None))
     }
 }
 
@@ -206,10 +215,7 @@ fn insert_mode(
     height: &mut u16,
     recovery: &mut Recovery,
 ) -> io::Result<()> {
-    let name = editor
-        .path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "[No file]".into());
+    let name = editor_title(editor);
     let (mode, count) = request;
     let session = state
         .begin_counted_insert(editor, mode, count)
@@ -273,7 +279,7 @@ fn input_session(
                 );
             }
             let mut output = io::stdout().lock();
-            draw_frame(&mut output, &frame, *height, &frame.status, frame.cursor)?;
+            draw_frame(&mut output, &frame, *height)?;
             drop(output);
             match read_event(*width, *height)? {
                 Event::Resize(w, h) => {
@@ -333,27 +339,21 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
             command.message = Some(format!("? recovery unavailable: {error}"));
         }
         let name = editor_name(editor);
-        let frame = state.frame(editor.buffer(), &name, width, height);
+        let mut frame = state.frame(editor.buffer(), &name, width, height);
         if !editor.buffer().is_empty() {
             editor
                 .set_current(state.row)
                 .map_err(|e| io::Error::other(format!("{e:?}")))?;
         }
         state.checkpoint_line(editor);
-        let cursor = if command.input.is_some() {
-            command
-                .display(width)
-                .and_then(|(_, x)| x)
-                .filter(|_| height > 0)
-                .map(|x| (x, height - 1))
-        } else {
-            frame.cursor
-        };
-        let status = command
-            .display(width)
-            .map_or_else(|| frame.status.clone(), |(text, _)| text);
+        if let Some((status, column)) = command.display(width) {
+            frame.status = status;
+            if command.input.is_some() {
+                frame.cursor = column.filter(|_| height > 0).map(|x| (x, height - 1));
+            }
+        }
         let mut output = io::stdout().lock();
-        draw_frame(&mut output, &frame, height, &status, cursor)?;
+        draw_frame(&mut output, &frame, height)?;
         drop(output);
         // Some terminal environments do not deliver resize events reliably.
         // Check dimensions while idle as well, including during command input.
@@ -382,21 +382,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
             }
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 if command.input.is_some() {
-                    command.input_error = None;
-                    if key.code == KeyCode::Enter {
-                        let text = command.input.take().unwrap();
-                        if let Some(forward) = command.search_direction {
-                            if let Err(error) = state.search(editor, &text, forward) {
-                                command.message = Some(format!("? {error}"));
-                            }
-                        } else if !text.trim().is_empty()
-                            && command.execute(&text, editor, &mut state)
-                        {
-                            return Ok(());
-                        }
-                        continue;
+                    if command.handle_event(key, editor, &mut state) {
+                        return Ok(());
                     }
-                    command.key(key);
                     continue;
                 }
                 command.message = None;
