@@ -98,30 +98,7 @@ impl TextEdit<'_> {
         if character.is_control() && character != '\n' && character != '\t' {
             return Err("unsupported replacement character".into());
         }
-        let start = self.cursor;
-        let old = if character == '\n' {
-            None
-        } else {
-            self.draft
-                .line(start.row)
-                .and_then(|line| line.chars().nth(start.column))
-        };
-        let end = Position {
-            column: start.column + usize::from(old.is_some()),
-            ..start
-        };
-        let was_empty = self.draft.is_empty();
-        self.cursor = self
-            .draft
-            .replace_text(start, end, &character.to_string())
-            .map_err(str::to_owned)?;
-        self.replacements.push((
-            start,
-            self.cursor,
-            old.map_or_else(String::new, |c| c.to_string()),
-            was_empty,
-        ));
-        self.crossed_lines |= character == '\n';
+        self.apply_replace_text(&character.to_string(), true)?;
         self.record(InputAction::Replace(character));
         Ok(())
     }
@@ -138,6 +115,14 @@ impl TextEdit<'_> {
     }
 
     fn write_replace_text(&mut self, text: &str, overwrite: bool) -> Result<(), String> {
+        self.apply_replace_text(text, overwrite)?;
+        if !text.is_empty() && self.input_actions.is_some() {
+            self.record(InputAction::ReplaceText(text.to_owned()));
+        }
+        Ok(())
+    }
+
+    fn apply_replace_text(&mut self, text: &str, overwrite: bool) -> Result<(), String> {
         if text.contains('\r') {
             return Err("carriage returns are not supported".into());
         }
@@ -193,9 +178,6 @@ impl TextEdit<'_> {
             .map_err(str::to_owned)?;
         self.crossed_lines |= text.contains('\n');
         self.replacements.extend(history);
-        if self.input_actions.is_some() {
-            self.record(InputAction::ReplaceText(text.to_owned()));
-        }
         Ok(())
     }
 
@@ -428,71 +410,75 @@ impl TextEdit<'_> {
         Ok(())
     }
 
+    /// Determine visual undo placement without publishing the draft.
+    fn undo_location(&self) -> Option<super::UndoLocation> {
+        let original = &self.editor.buffer;
+        let single_line = !self.crossed_lines
+            && self.draft.line_count() == original.line_count()
+            && self.draft.has_trailing_newline() == original.has_trailing_newline()
+            && (0..original.line_count())
+                .all(|r| r == self.undo_anchor.row || self.draft.line(r) == original.line(r));
+        let anchor = single_line.then_some(super::UndoLocation::Character(self.undo_anchor));
+        // Open-line input may include cross-boundary erase/delete extensions.
+        // Only publish insertion semantics when both original sides survive.
+        let opened = self.opened_at.and_then(|at| {
+            let added = self.draft.line_count().checked_sub(original.line_count())?;
+            (added > 0
+                && at <= original.line_count()
+                && (0..at).all(|r| original.line(r) == self.draft.line(r))
+                && (at..original.line_count())
+                    .all(|r| original.line(r) == self.draft.line(r + added)))
+            .then_some(super::UndoLocation::Lines {
+                next: at.saturating_sub(1),
+                opposite: at,
+            })
+        });
+        // The first LF saves the original line. Both undo directions
+        // restore a nonempty block, so both target its first line.
+        let expanded = self.input_row.and_then(|at| {
+            let added = self.draft.line_count().checked_sub(original.line_count())?;
+            (added > 0
+                && at < original.line_count()
+                && self.draft.has_trailing_newline() == original.has_trailing_newline()
+                && (0..at).all(|r| original.line(r) == self.draft.line(r))
+                && (at + 1..original.line_count())
+                    .all(|r| original.line(r) == self.draft.line(r + added)))
+            .then_some(super::UndoLocation::Lines {
+                next: at,
+                opposite: at,
+            })
+        });
+        let replaced = self.replaced_lines.and_then(|(start, end)| {
+            let suffix = original.line_count().checked_sub(end + 1)?;
+            let after = self.draft.line_count().checked_sub(suffix)?;
+            (after > start
+                && self.draft.has_trailing_newline() == original.has_trailing_newline()
+                && (0..start).all(|r| original.line(r) == self.draft.line(r))
+                && (0..suffix).all(|r| original.line(end + 1 + r) == self.draft.line(after + r)))
+            .then_some(match self.initial_undo_column {
+                Some(column) => {
+                    super::UndoLocation::InitialCharacter(Position { row: start, column })
+                }
+                None => super::UndoLocation::Lines {
+                    next: start,
+                    opposite: start,
+                },
+            })
+        });
+        replaced.or(opened).or(expanded).or(anchor)
+    }
+
     pub fn commit(self) -> Result<Position, String> {
-        let pending_register = self.pending_register;
         if self.draft != self.editor.buffer {
             let row = self.cursor.row;
-            let original = &self.editor.buffer;
-            let single_line = !self.crossed_lines
-                && self.draft.line_count() == original.line_count()
-                && self.draft.has_trailing_newline() == original.has_trailing_newline()
-                && (0..original.line_count())
-                    .all(|r| r == self.undo_anchor.row || self.draft.line(r) == original.line(r));
-            let anchor = single_line.then_some(super::UndoLocation::Character(self.undo_anchor));
-            // Open-line input may include cross-boundary erase/delete extensions.
-            // Only publish insertion semantics when both original sides survive.
-            let opened = self.opened_at.and_then(|at| {
-                let added = self.draft.line_count().checked_sub(original.line_count())?;
-                (added > 0
-                    && at <= original.line_count()
-                    && (0..at).all(|r| original.line(r) == self.draft.line(r))
-                    && (at..original.line_count())
-                        .all(|r| original.line(r) == self.draft.line(r + added)))
-                .then_some(super::UndoLocation::Lines {
-                    next: at.saturating_sub(1),
-                    opposite: at,
-                })
-            });
-            // The first LF saves the original line. Both undo directions
-            // restore a nonempty block, so both target its first line.
-            let expanded = self.input_row.and_then(|at| {
-                let added = self.draft.line_count().checked_sub(original.line_count())?;
-                (added > 0
-                    && at < original.line_count()
-                    && self.draft.has_trailing_newline() == original.has_trailing_newline()
-                    && (0..at).all(|r| original.line(r) == self.draft.line(r))
-                    && (at + 1..original.line_count())
-                        .all(|r| original.line(r) == self.draft.line(r + added)))
-                .then_some(super::UndoLocation::Lines {
-                    next: at,
-                    opposite: at,
-                })
-            });
-            let replaced = self.replaced_lines.and_then(|(start, end)| {
-                let suffix = original.line_count().checked_sub(end + 1)?;
-                let after = self.draft.line_count().checked_sub(suffix)?;
-                (after > start
-                    && self.draft.has_trailing_newline() == original.has_trailing_newline()
-                    && (0..start).all(|r| original.line(r) == self.draft.line(r))
-                    && (0..suffix)
-                        .all(|r| original.line(end + 1 + r) == self.draft.line(after + r)))
-                .then_some(match self.initial_undo_column {
-                    Some(column) => {
-                        super::UndoLocation::InitialCharacter(Position { row: start, column })
-                    }
-                    None => super::UndoLocation::Lines {
-                        next: start,
-                        opposite: start,
-                    },
-                })
-            });
+            let location = self.undo_location();
             self.editor.edit(move |buffer| {
                 *buffer = self.draft;
                 Ok(if buffer.is_empty() { None } else { Some(row) })
             })?;
-            self.editor.undo_location = replaced.or(opened).or(expanded).or(anchor);
+            self.editor.undo_location = location;
         }
-        if let Some(register) = pending_register {
+        if let Some(register) = self.pending_register {
             self.editor.unnamed = Some(register);
         }
         Ok(self.cursor)

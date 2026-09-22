@@ -157,37 +157,32 @@ fn edit_key(edit: &mut impl InputTarget, replace: bool, key: KeyEvent) -> Result
 }
 
 fn action_for_key(replace: bool, key: KeyEvent) -> Option<InputAction> {
-    match key.code {
-        KeyCode::Backspace => Some(if replace {
-            InputAction::RestoreReplacement
-        } else {
-            InputAction::Backspace
-        }),
-        KeyCode::Delete if !replace => Some(InputAction::Delete),
-        KeyCode::Enter => Some(if replace {
-            InputAction::Replace('\n')
-        } else {
-            InputAction::Insert("\n".into())
-        }),
-        KeyCode::Tab => Some(if replace {
-            InputAction::Replace('\t')
-        } else {
-            InputAction::Insert("\t".into())
-        }),
+    let character = match key.code {
+        KeyCode::Backspace => {
+            return Some(if replace {
+                InputAction::RestoreReplacement
+            } else {
+                InputAction::Backspace
+            });
+        }
+        KeyCode::Delete if !replace => return Some(InputAction::Delete),
+        KeyCode::Enter => '\n',
+        KeyCode::Tab => '\t',
         KeyCode::Char(c)
             if !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 && !c.is_control() =>
         {
-            Some(if replace {
-                InputAction::Replace(c)
-            } else {
-                InputAction::Insert(c.to_string())
-            })
+            c
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some(if replace {
+        InputAction::Replace(character)
+    } else {
+        InputAction::Insert(character.to_string())
+    })
 }
 
 #[cfg(test)]
