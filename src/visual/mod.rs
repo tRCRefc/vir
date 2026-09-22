@@ -39,36 +39,6 @@ pub enum Motion {
     BigWordEnd,
 }
 
-impl VisualState {
-    pub fn delete_lines(
-        &mut self,
-        editor: &mut crate::editor::Editor,
-        count: usize,
-    ) -> Result<(), String> {
-        if editor.buffer().is_empty() {
-            return Err("EmptyBuffer".into());
-        }
-        let end = self
-            .row
-            .saturating_add(count.max(1) - 1)
-            .min(editor.buffer().line_count() - 1);
-        let register = crate::editor::Register::lines(editor.buffer(), self.row, end)?;
-        editor.delete_lines(self.row, end)?;
-        editor.set_line_undo(self.row, self.row.saturating_sub(1));
-        editor.unnamed = Some(register);
-        self.row = editor.current().unwrap_or(0);
-        self.column = 0;
-        self.preferred_column = 0;
-        self.left = 0;
-        self.top = self.top.min(self.row);
-        self.last_change = Some(repeat::ChangeRecord::Delete {
-            motion: None,
-            count: Some(count.max(1)),
-        });
-        Ok(())
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct VisualState {
     pub row: usize,

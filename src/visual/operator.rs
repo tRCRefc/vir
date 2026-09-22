@@ -100,6 +100,38 @@ impl EditRange {
 }
 
 impl VisualState {
+    pub fn delete_lines(&mut self, editor: &mut Editor, count: usize) -> Result<(), String> {
+        let (start, end) = self.counted_lines(editor.buffer(), count)?;
+        let register = Register::lines(editor.buffer(), start, end)?;
+        editor.delete_lines(self.row, end)?;
+        editor.set_line_undo(self.row, self.row.saturating_sub(1));
+        editor.unnamed = Some(register);
+        self.row = editor.current().unwrap_or(0);
+        self.column = 0;
+        self.preferred_column = 0;
+        self.left = 0;
+        self.top = self.top.min(self.row);
+        self.last_change = Some(ChangeRecord::Delete {
+            motion: None,
+            count: Some(count.max(1)),
+        });
+        Ok(())
+    }
+}
+
+impl VisualState {
+    /// Inclusive range for dd/cc/yy; oversized counts stop at EOF.
+    fn counted_lines(&self, buffer: &TextBuffer, count: usize) -> Result<(usize, usize), String> {
+        if buffer.is_empty() {
+            return Err("EmptyBuffer".into());
+        }
+        let end = self
+            .row
+            .saturating_add(count.max(1) - 1)
+            .min(buffer.line_count() - 1);
+        Ok((self.row, end))
+    }
+
     fn motion_range(
         &self,
         editor: &Editor,
@@ -306,15 +338,8 @@ impl VisualState {
         let range = if let Some(motion) = motion {
             self.motion_range(editor, motion, count, Operator::Yank)?
         } else {
-            if editor.buffer().is_empty() {
-                return Err("EmptyBuffer".into());
-            }
-            EditRange::Lines(
-                self.row,
-                self.row
-                    .saturating_add(count.unwrap_or(1).max(1) - 1)
-                    .min(editor.buffer().line_count() - 1),
-            )
+            let (start, end) = self.counted_lines(editor.buffer(), count.unwrap_or(1))?;
+            EditRange::Lines(start, end)
         };
         editor.unnamed = Some(range.capture(editor)?);
         Ok(())
@@ -345,12 +370,8 @@ impl VisualState {
                 edit.record_input();
                 return Ok(edit);
             }
-            EditRange::Lines(
-                self.row,
-                self.row
-                    .saturating_add(count.unwrap_or(1).max(1) - 1)
-                    .min(editor.buffer().line_count() - 1),
-            )
+            let (start, end) = self.counted_lines(editor.buffer(), count.unwrap_or(1))?;
+            EditRange::Lines(start, end)
         };
         let register = range.capture(editor)?;
         let replaced_lines = match range {
