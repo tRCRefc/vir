@@ -325,6 +325,38 @@ def open_undo_cursor(session):
     session.save_exit(b"  one\n  two\n Z\nthree\n")
 
 
+def net_unchanged(session):
+    session.send(b"3cl", b"[INSERT]")
+    session.send(b"ab", b"1/4  col 3")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b":w\r", b"Written")
+    session.send(b"Gyy", b"4/4  col 1")
+    session.send(b"2G", b"2/4  col 1")
+    # Replaying with count two changes neither text nor the saved count of three.
+    session.send(b"2.", b"2/4  col 1")
+    session.send(b"j.", b"abZ")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"ab\nabC\nabZ\nREG\n"
+    session.send(b"u", b"ZZZZ")
+    session.send(b"2G", b"2/4  col 1")
+    session.send(b"Gyy", b"4/4  col 1")
+    session.send(b"2G", b"2/4  col 1")
+    session.send(b"2.", b"2/4  col 1")
+    # The staged character register must not replace the previous line yank.
+    session.send(b"P", b"2/5  col 1")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"ab\nREG\nabC\nZZZZ\nREG\n"
+    session.send(b"u", b"1/4  col 1")
+    session.send(b":w\r", b"Written")
+    session.send(b"2G", b"2/4  col 1")
+    # Direct change publishes the captured characters even when text is identical.
+    session.send(b"2cl", b"[INSERT]")
+    session.send(b"ab", b"2/4  col 3")
+    session.send(b"\x1b", b"2/4  col 2")
+    session.send(b"0P", b"ababC")
+    session.save_exit(b"ab\nababC\nZZZZ\nREG\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -342,10 +374,10 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
-        session = Session(directory, b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")
+        session = Session(directory, b"QQQ\nabC\nZZZZ\nREG\n" if action == net_unchanged else b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")
         try:
             action(session)
         finally:
