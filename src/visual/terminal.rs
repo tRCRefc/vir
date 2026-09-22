@@ -52,6 +52,54 @@ struct CommandLine {
     input_error: Option<String>,
 }
 
+/// Prefixes and one-character replacement share cancellation, but not decoding.
+#[derive(Default)]
+struct NormalInput {
+    prefix: NormalPrefix,
+    replacement: Option<ReplaceKeys>,
+}
+
+impl NormalInput {
+    /// A paste cancels an unfinished command instead of supplying its argument.
+    fn cancel(&mut self) -> bool {
+        let pending = self.replacement.is_some() || self.prefix.is_pending();
+        *self = Self::default();
+        pending
+    }
+
+    fn key(
+        &mut self,
+        key: KeyEvent,
+        editor: &mut Editor,
+        state: &mut VisualState,
+        command: &mut CommandLine,
+    ) -> Result<PrefixAction, String> {
+        let Some(mut pending) = self.replacement.take() else {
+            return self.prefix.key(key).map_err(str::to_owned);
+        };
+        match pending.key(key) {
+            Ok(ReplaceKey::Pending) => {
+                if pending.is_quoted() {
+                    command.message = Some("[VIEW] quote: type one replacement character".into());
+                }
+                self.replacement = Some(pending);
+            }
+            Ok(ReplaceKey::Cancel) => {}
+            Ok(ReplaceKey::Character(character)) => {
+                state.replace_counted(editor, character, pending.count)?;
+            }
+            Err(error) => {
+                if pending.is_quoted() {
+                    self.replacement = Some(pending);
+                }
+                return Err(error);
+            }
+        }
+        // The key belongs to r even when it cancels or completes replacement.
+        Ok(PrefixAction::Pending)
+    }
+}
+
 fn editor_title(editor: &Editor) -> String {
     editor
         .path()
@@ -119,7 +167,7 @@ impl CommandLine {
                 input.pop();
             }
             KeyCode::Enter => {
-                // Enter is handled by the event loop so searches can update VisualState.
+                // Enter is handled by handle_event so searches can update VisualState.
             }
             KeyCode::Char(c)
                 if !key
@@ -331,8 +379,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     let _guard = TerminalGuard::enter()?;
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
-    let mut prefix = NormalPrefix::default();
-    let mut replace_pending: Option<ReplaceKeys> = None;
+    let mut normal = NormalInput::default();
     let (mut width, mut height) = terminal::size()?;
     loop {
         if let Err(error) = recovery.observe(editor) {
@@ -367,9 +414,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 if command.input.is_some() {
                     command.paste(&text);
                 } else {
-                    let pending = replace_pending.is_some() || prefix.is_pending();
-                    prefix = NormalPrefix::default();
-                    replace_pending = None;
+                    let pending = normal.cancel();
                     command.message = if pending {
                         Some("? paste cancelled pending command; nothing pasted".into())
                     } else {
@@ -388,33 +433,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
-                if let Some(mut pending) = replace_pending.take() {
-                    match pending.key(key) {
-                        Ok(ReplaceKey::Pending) => {
-                            if pending.is_quoted() {
-                                command.message =
-                                    Some("[VIEW] quote: type one replacement character".into());
-                            }
-                            replace_pending = Some(pending);
-                        }
-                        Ok(ReplaceKey::Cancel) => {}
-                        Ok(ReplaceKey::Character(character)) => {
-                            if let Err(error) =
-                                state.replace_counted(editor, character, pending.count)
-                            {
-                                command.message = Some(format!("? {error}"));
-                            }
-                        }
-                        Err(error) => {
-                            command.message = Some(format!("? {error}"));
-                            if pending.is_quoted() {
-                                replace_pending = Some(pending);
-                            }
-                        }
-                    }
-                    continue;
-                }
-                match prefix.key(key) {
+                match normal.key(key, editor, &mut state, &mut command) {
                     Ok(PrefixAction::Pending) => continue,
                     Ok(PrefixAction::Insert(mode, count)) => {
                         insert_mode(
@@ -429,7 +448,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     }
                     Ok(PrefixAction::Replace(count)) => {
                         match state.replacement_end(editor, count) {
-                            Ok(_) => replace_pending = Some(ReplaceKeys::new(count)),
+                            Ok(_) => normal.replacement = Some(ReplaceKeys::new(count)),
                             Err(error) => command.message = Some(format!("? {error}")),
                         }
                         continue;
@@ -584,6 +603,87 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacement_retry_completion_and_paste_cancel_do_not_leak_prefixes() {
+        let mut editor = Editor::default();
+        editor.insert_lines(0, ["abc"]).unwrap();
+        let mut state = VisualState::default();
+        let mut command = CommandLine::default();
+        let mut normal = NormalInput {
+            replacement: Some(ReplaceKeys::new(2)),
+            ..NormalInput::default()
+        };
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        normal
+            .key(
+                KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+                &mut editor,
+                &mut state,
+                &mut command,
+            )
+            .unwrap();
+        assert!(
+            normal
+                .key(key(KeyCode::Left), &mut editor, &mut state, &mut command)
+                .is_err()
+        );
+        assert_eq!(editor.buffer().line(0), Some("abc"));
+        assert_eq!(
+            normal
+                .key(
+                    key(KeyCode::Char('x')),
+                    &mut editor,
+                    &mut state,
+                    &mut command
+                )
+                .unwrap(),
+            PrefixAction::Pending
+        );
+        assert_eq!(editor.buffer().line(0), Some("xxc"));
+        assert!(!normal.cancel());
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer().line(0), Some("abc"));
+
+        normal.replacement = Some(ReplaceKeys::new(1));
+        assert!(
+            normal
+                .key(key(KeyCode::Left), &mut editor, &mut state, &mut command)
+                .is_err()
+        );
+        assert!(!normal.cancel());
+        normal.replacement = Some(ReplaceKeys::new(1));
+        assert!(normal.cancel());
+        normal
+            .key(
+                key(KeyCode::Char('2')),
+                &mut editor,
+                &mut state,
+                &mut command,
+            )
+            .unwrap();
+        normal
+            .key(
+                key(KeyCode::Char('d')),
+                &mut editor,
+                &mut state,
+                &mut command,
+            )
+            .unwrap();
+        assert!(normal.cancel());
+        assert_eq!(
+            normal
+                .key(
+                    key(KeyCode::Char('x')),
+                    &mut editor,
+                    &mut state,
+                    &mut command
+                )
+                .unwrap(),
+            PrefixAction::Pass
+        );
+        assert_eq!(editor.buffer().line(0), Some("abc"));
+    }
 
     #[test]
     fn command_paste_is_literal_single_line_and_requires_enter() {
