@@ -1,2 +1,5 @@
 /target
 /*.md
+
+# Local Agent guidance and research; keep out of Git.
+/docs/
