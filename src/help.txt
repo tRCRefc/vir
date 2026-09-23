@@ -187,8 +187,10 @@ input segment; o/O open and type once even with n. (historical vi). R
 overwrites once and inserts extra first-segment copies. Each dot is one undo.
 Movement, search, yank, undo, saving and ex commands do not replace the
 visual repeat record; file switches preserve it. Put repeats use the current
-unnamed register. Failed, cancelled or net-unchanged edits preserve the
-record. Replay errors leave text, registers, cursor and undo unchanged.
+unnamed register. Successful r replaces undo and the repeat record even
+when the characters match, and marks the buffer modified. Other net-unchanged
+edits, failed edits and cancelled edits preserve the repeat record. Replay
+errors leave text, registers, cursor and undo unchanged.
 Input replay expansion is limited to 1,000,000 work units (inserted bytes
 plus other actions and one overhead unit per repetition). Backspace and
 Replace restoration add no expansion cost, so the limit does not block

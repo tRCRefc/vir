@@ -469,7 +469,16 @@ impl TextEdit<'_> {
     }
 
     pub fn commit(self) -> Result<Position, String> {
-        if self.draft != self.editor.buffer {
+        self.commit_inner(false)
+    }
+
+    /// Successful visual r replaces undo even when the characters match.
+    pub(crate) fn commit_even_if_unchanged(self) -> Result<Position, String> {
+        self.commit_inner(true)
+    }
+
+    fn commit_inner(self, publish_unchanged: bool) -> Result<Position, String> {
+        if publish_unchanged || self.draft != self.editor.buffer {
             let row = self.cursor.row;
             let location = self.undo_location();
             self.editor.edit(move |buffer| {

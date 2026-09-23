@@ -155,7 +155,8 @@ impl VisualState {
     }
 
     /// Replay on private state, publishing text, register, cursor, undo and the
-    /// effective count together. Error/no-op cannot damage the original record.
+    /// effective count together. Successful r also publishes identical text;
+    /// other unchanged replays retain their existing publication policy.
     pub fn repeat_change(
         &mut self,
         editor: &mut Editor,
@@ -168,7 +169,9 @@ impl VisualState {
         let mut staged_editor = editor.clone();
         let mut staged_state = self.clone();
         change.apply(&mut staged_state, &mut staged_editor)?;
-        if staged_editor.buffer() != editor.buffer() {
+        if matches!(change, ChangeRecord::Replace { .. })
+            || staged_editor.buffer() != editor.buffer()
+        {
             staged_state.last_change = Some(change);
             *editor = staged_editor;
             *self = staged_state;

@@ -55,7 +55,7 @@ fn input_and_backward_deletion_restore_the_edit_start() {
 }
 
 #[test]
-fn noops_and_failed_edits_keep_anchor_and_dot_publishes_a_new_one() {
+fn identical_r_publishes_anchor_and_failed_edits_preserve_it() {
     let mut editor = editor();
     let mut state = VisualState::default();
     state.column = 2;
@@ -68,7 +68,8 @@ fn noops_and_failed_edits_keep_anchor_and_dot_publishes_a_new_one() {
     input.apply_input(&InputAction::Backspace).unwrap();
     input.commit(&mut state).unwrap();
     state.undo(&mut editor).unwrap();
-    assert_eq!(state.column, 2);
+    assert_eq!(state.column, 0);
+    assert_eq!(editor.buffer().line(0), Some("a中Xdef"));
     state.column = 4;
     state.repeat_change(&mut editor, None).unwrap();
     state.undo(&mut editor).unwrap();

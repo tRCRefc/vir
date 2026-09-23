@@ -357,6 +357,21 @@ def net_unchanged(session):
     session.save_exit(b"ab\nababC\nZZZZ\nREG\n")
 
 
+def identical_r(session):
+    session.send(b"3ra", b"aaadef")
+    session.send(b":w\r", b"Written")
+    session.send(b"02ra", b"1/1  col 2")
+    session.send(b":q\r", b"unsaved changes")
+    session.send(b"u", b"1/1  col 1")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"aaadef\n"
+    session.send(b"ll.", b"aaaaef")
+    # Escape cancels r and keeps the successful count=2 repeat.
+    session.send(b"r\x1b", b"[VIEW]")
+    session.send(b"l.", b"aaaaaa")
+    session.save_exit(b"aaaaaa\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -374,7 +389,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"QQQ\nabC\nZZZZ\nREG\n" if action == net_unchanged else b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")

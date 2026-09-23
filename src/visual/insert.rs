@@ -136,17 +136,6 @@ impl VisualState {
         }
         let count = count.max(1);
         let end = self.replacement_end(editor, count)?;
-        let changed = editor
-            .buffer()
-            .line(self.row)
-            .unwrap()
-            .chars()
-            .skip(self.column)
-            .take(count)
-            .any(|c| c != replacement);
-        if !changed {
-            return Ok(());
-        }
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column: self.column,
@@ -169,7 +158,7 @@ impl VisualState {
         } else {
             edit.insert(&replacement.to_string().repeat(count))?;
         }
-        let position = edit.commit()?;
+        let position = edit.commit_even_if_unchanged()?;
         self.row = position.row;
         self.column = position.column.saturating_sub(1);
         self.preferred_column = self.column;

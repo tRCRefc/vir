@@ -83,19 +83,54 @@ fn short_line_overflow_and_invalid_character_fail_without_losing_previous_repeat
 }
 
 #[test]
-fn same_character_replacement_keeps_existing_noop_policy() {
-    let mut editor = editor("abcdef");
-    let mut state = VisualState::default();
-    state.replace_counted(&mut editor, 'X', 3).unwrap();
-    state.column = 0;
-    let before = editor.clone();
-    let visual = format!("{state:?}");
-    state.replace_counted(&mut editor, 'X', 2).unwrap();
-    assert_eq!(editor, before);
-    assert_eq!(format!("{state:?}"), visual);
-    state.column = 3;
-    state.repeat_change(&mut editor, None).unwrap();
-    assert_eq!(editor.buffer().to_text(), "XXXXXX");
+fn identical_r_publishes_undo_cursor_modified_and_repeat() {
+    for character in ['a', '中'] {
+        for lf in ["", "\n"] {
+            for saved in [false, true] {
+                for count in [1, 2] {
+                    for replay in [false, true] {
+                        let directory = tempfile::tempdir().unwrap();
+                        let mut editor = editor(&format!("b{character}{character}X{lf}"));
+                        let mut state = VisualState::default();
+                        state.yank(&mut editor, Some(Motion::End), None).unwrap();
+                        let register = editor.unnamed_register().cloned();
+                        state.replace_character(&mut editor, character).unwrap();
+                        if saved {
+                            editor
+                                .write_to(Some(&directory.path().join("text")))
+                                .unwrap();
+                            assert!(!editor.is_modified());
+                        }
+                        let before = editor.buffer().clone();
+                        if replay {
+                            state.repeat_change(&mut editor, Some(count)).unwrap();
+                        } else {
+                            state
+                                .replace_counted(&mut editor, character, count)
+                                .unwrap();
+                        }
+                        assert_eq!(editor.buffer(), &before);
+                        assert!(editor.is_modified());
+                        assert_eq!(state.column, count - 1);
+                        assert_eq!(editor.unnamed_register(), register.as_ref());
+                        let mut undo_editor = editor.clone();
+                        for _ in 0..2 {
+                            undo_editor.undo().unwrap();
+                            assert_eq!(undo_editor.buffer(), &before);
+                        }
+                        state.column = 4 - count;
+                        state.repeat_change(&mut editor, None).unwrap();
+                        assert_eq!(
+                            editor.buffer().to_text(),
+                            format!("{}{lf}", character.to_string().repeat(4))
+                        );
+                        editor.undo().unwrap();
+                        assert_eq!(editor.buffer(), &before);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

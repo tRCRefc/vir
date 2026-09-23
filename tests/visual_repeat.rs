@@ -227,7 +227,6 @@ fn failed_cancelled_and_net_unchanged_edits_keep_the_previous_record() {
         InputStart::Insert('i'),
         &[InputAction::Insert("x".into()), InputAction::Backspace],
     );
-    state.replace_character(&mut editor, 'Z').unwrap();
     input(
         &mut state,
         &mut editor,

@@ -229,15 +229,12 @@ fn empty_and_retracted_input_preserve_saved_state_undo_and_dot() {
 }
 
 #[test]
-fn identical_r_failed_change_and_dropped_draft_preserve_all_published_state() {
+fn failed_change_and_dropped_draft_preserve_all_published_state() {
     for saved in [false, true] {
         for lf in ["", "\n"] {
-            let (_directory, mut editor, mut state) = fixture(saved, lf);
+            let (_directory, mut editor, state) = fixture(saved, lf);
             let before = editor.clone();
             let visual = format!("{state:?}");
-            state.replace_character(&mut editor, '中').unwrap();
-            assert_eq!(editor, before);
-            assert_eq!(format!("{state:?}"), visual);
             assert!(
                 state
                     .begin_change(&mut editor, Some(Motion::Up), Some(3))
