@@ -211,7 +211,7 @@ fn puts_use_current_register_and_join_repeat_is_one_undo() {
 }
 
 #[test]
-fn failed_cancelled_and_net_unchanged_edits_keep_the_previous_record() {
+fn failed_and_cancelled_edits_keep_the_previous_record() {
     let mut editor = editor("abc\nx");
     let mut state = VisualState::default();
     let initial = editor.clone();
@@ -221,14 +221,6 @@ fn failed_cancelled_and_net_unchanged_edits_keep_the_previous_record() {
     let before = editor.clone();
     drop(state.begin_insert(&mut editor, 'o').unwrap());
     assert_eq!(editor, before);
-    // Typing an identical character without erasing it remains a separate
-    // net-unchanged case, pending the broader Replace-session review.
-    input(
-        &mut state,
-        &mut editor,
-        InputStart::Insert('R'),
-        &[InputAction::Replace('Z')],
-    );
     state.row = 1;
     state.column = 0;
     let before = editor.clone();

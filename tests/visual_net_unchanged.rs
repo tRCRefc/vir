@@ -643,3 +643,113 @@ fn legacy_retracted_input_publishes_history_but_original_text_erasure_does_not()
     assert_old_history(&editor, &state, "\n");
     assert_old_repeat(&editor, &state);
 }
+
+#[test]
+fn identical_replace_input_publishes_history_and_normalized_counted_dot() {
+    for saved in [false, true] {
+        for lf in ["", "\n"] {
+            for corrected in [false, true] {
+                let (_directory, mut editor, mut state) = fixture(saved, lf);
+                let before = editor.buffer().clone();
+                let register = editor.unnamed_register().cloned();
+                let mut input = state.begin_counted_insert(&mut editor, 'R', 1).unwrap();
+                input
+                    .paste(if corrected { "中🙂X" } else { "中🙂" })
+                    .unwrap();
+                if corrected {
+                    input.apply_input(&InputAction::RestoreReplacement).unwrap();
+                }
+                input.commit(&mut state).unwrap();
+                assert_eq!(editor.buffer(), &before);
+                assert!(editor.is_modified());
+                assert_eq!(state.column, 1);
+                for _ in 0..2 {
+                    state.undo(&mut editor).unwrap();
+                    assert_eq!(editor.buffer(), &before);
+                }
+                state.column = 0;
+                state.repeat_change(&mut editor, Some(1)).unwrap();
+                assert_eq!(state.column, 1);
+                assert_eq!(editor.buffer(), &before);
+                state.row = 2;
+                state.column = 0;
+                state.repeat_change(&mut editor, Some(2)).unwrap();
+                assert_eq!(editor.buffer().line(2), Some("中🙂中🙂ZZ"));
+                state.row = 3;
+                state.column = 0;
+                state.repeat_change(&mut editor, None).unwrap();
+                assert_eq!(editor.buffer().line(3), Some("中🙂中🙂G"));
+                assert_eq!(editor.unnamed_register(), register.as_ref());
+            }
+        }
+    }
+}
+
+#[test]
+fn partially_erased_input_replays_only_remaining_text_at_large_counts() {
+    for mode in ['i', 'a', 'I', 'A', 'R'] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("abc").unwrap());
+        let mut state = VisualState::default();
+        let mut edit = state.begin_insert(&mut editor, mode).unwrap();
+        if mode == 'R' {
+            edit.replace_input_text("X🙂").unwrap();
+            edit.replace_backspace().unwrap();
+        } else {
+            edit.insert("X🙂").unwrap();
+            edit.backspace().unwrap();
+        }
+        state.commit_input(edit, InputStart::Insert(mode)).unwrap();
+        // X costs one byte plus one overhead unit. Keeping erased emoji in
+        // the recipe would exceed the budget, although the net input fits.
+        state.repeat_change(&mut editor, Some(500_000)).unwrap();
+        assert_eq!(
+            editor.buffer().to_text().matches('X').count(),
+            if mode == 'R' { 500_000 } else { 500_001 }
+        );
+        assert!(!editor.buffer().to_text().contains('🙂'));
+    }
+}
+
+#[test]
+fn identical_replace_dot_publishes_explicit_count_and_saved_state() {
+    for (typed, original) in [("X", "abc\nXbc\nzzz\nzzz"), ("中", "abc\n中bc\nzzz\nzzz")] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = Editor::from_buffer(TextBuffer::from_text(original).unwrap());
+        let mut state = VisualState::default();
+        let mut input = state.begin_counted_insert(&mut editor, 'R', 2).unwrap();
+        input.paste(typed).unwrap();
+        input.commit(&mut state).unwrap();
+        editor
+            .write_to(Some(&directory.path().join("text")))
+            .unwrap();
+        let before = editor.buffer().clone();
+        state.row = 1;
+        state.column = 0;
+        let saved = editor.clone();
+        let visual = format!("{state:?}");
+        assert!(state.repeat_change(&mut editor, Some(usize::MAX)).is_err());
+        assert_eq!(editor, saved);
+        assert_eq!(format!("{state:?}"), visual);
+        state.repeat_change(&mut editor, Some(1)).unwrap();
+        assert_eq!(editor.buffer(), &before);
+        assert!(editor.is_modified());
+        for _ in 0..2 {
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer(), &before);
+            assert_eq!(state.row, 1);
+        }
+        state.row = 2;
+        state.column = 0;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(editor.buffer().line(2), Some(format!("{typed}zz").as_str()));
+        // The legacy input API must publish identical R as well.
+        let before = editor.buffer().clone();
+        state.row = 1;
+        state.column = 0;
+        let mut edit = state.begin_insert(&mut editor, 'R').unwrap();
+        edit.replace_input_text(typed).unwrap();
+        state.commit_input(edit, InputStart::Insert('R')).unwrap();
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer(), &before);
+    }
+}

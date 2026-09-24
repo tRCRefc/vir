@@ -26,34 +26,38 @@ impl InputStart {
         }
     }
 
-    fn publishes_empty_input(&self) -> bool {
+    fn supports_single_line_input(&self) -> bool {
         // These commands share historical insrt, which saves undo before input.
         matches!(self, Self::Insert('i' | 'a' | 'I' | 'A' | 'R'))
     }
 
     // Historical vgetline erases from genbuf before vappend saves INS.
-    // Only recognize complete erasure within the input segment: deleting old
-    // text or crossing LF uses the project's separate, extended input rules.
-    fn has_empty_input(&self, actions: &[InputAction]) -> bool {
-        if !self.publishes_empty_input() {
-            return false;
+    // Original-text deletion and LF crossing retain their separate recipes.
+    fn single_line_input(&self, actions: &[InputAction]) -> Option<String> {
+        if !self.supports_single_line_input() {
+            return None;
         }
         let replace = *self == Self::Insert('R');
-        actions
-            .iter()
-            .try_fold(0usize, |length, action| match action {
-                InputAction::Insert(text) if !replace && !text.contains('\n') => {
-                    length.checked_add(text.chars().count())
+        let mut text = String::new();
+        for action in actions {
+            match action {
+                InputAction::Insert(input) if !replace && !input.contains('\n') => {
+                    text.push_str(input)
                 }
-                InputAction::ReplaceText(text) if replace && !text.contains('\n') => {
-                    length.checked_add(text.chars().count())
+                InputAction::ReplaceText(input) if replace && !input.contains('\n') => {
+                    text.push_str(input)
                 }
-                InputAction::Replace(c) if replace && *c != '\n' => length.checked_add(1),
-                InputAction::Backspace if !replace => length.checked_sub(1),
-                InputAction::RestoreReplacement if replace => length.checked_sub(1),
-                _ => None,
-            })
-            == Some(0)
+                InputAction::Replace(c) if replace && *c != '\n' => text.push(*c),
+                InputAction::Backspace if !replace => {
+                    text.pop()?;
+                }
+                InputAction::RestoreReplacement if replace => {
+                    text.pop()?;
+                }
+                _ => return None,
+            }
+        }
+        Some(text)
     }
 
     fn normalized(self) -> Self {
@@ -154,7 +158,7 @@ impl ChangeRecord {
 
 impl VisualState {
     /// Commit one live input session and publish its logical replay record only
-    /// when it changes text or completes empty/fully erased i/a/I/A/R input.
+    /// when it changes text or completes single-line i/a/I/A/R input.
     /// Dropping the edit cancels both.
     pub fn commit_input(
         &mut self,
@@ -174,17 +178,27 @@ impl VisualState {
         completed: bool,
     ) -> Result<(), String> {
         let changed = edit.has_changes();
-        let publish_empty = completed && !changed && start.has_empty_input(&actions);
-        if publish_empty {
+        let input = completed
+            .then(|| start.single_line_input(&actions))
+            .flatten();
+        let publish_input = input.is_some();
+        if let Some(text) = input {
             actions.clear();
+            if !text.is_empty() {
+                actions.push(if start == InputStart::Insert('R') {
+                    InputAction::ReplaceText(text)
+                } else {
+                    InputAction::Insert(text)
+                });
+            }
         }
-        let position = if publish_empty {
+        let position = if publish_input {
             edit.commit_even_if_unchanged()?
         } else {
             edit.commit()?
         };
         self.finish_insert(position);
-        if changed || publish_empty {
+        if changed || publish_input {
             self.last_change = Some(ChangeRecord::Input {
                 start: start.normalized(),
                 actions,
@@ -195,7 +209,7 @@ impl VisualState {
     }
 
     /// Replay on private state, publishing text, register, cursor, undo and the
-    /// effective count together. Successful r and empty i/a/I/A/R publish identical text;
+    /// effective count together. Successful r and single-line input publish identical text;
     /// other unchanged replays retain their existing publication policy.
     pub fn repeat_change(
         &mut self,
@@ -209,12 +223,12 @@ impl VisualState {
         let mut staged_editor = editor.clone();
         let mut staged_state = self.clone();
         change.apply(&mut staged_state, &mut staged_editor)?;
-        let publish_empty = matches!(
+        let publish_input = matches!(
             &change,
             ChangeRecord::Input { start, actions, .. }
-                if start.publishes_empty_input() && actions.is_empty()
+                if start.single_line_input(actions).is_some()
         );
-        if publish_empty
+        if publish_input
             || matches!(change, ChangeRecord::Replace { .. })
             || staged_editor.buffer() != editor.buffer()
         {
