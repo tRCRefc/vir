@@ -372,6 +372,20 @@ def identical_r(session):
     session.save_exit(b"aaaaaa\n")
 
 
+def empty_input(session):
+    for mode in [b"i", b"R"]:
+        session.send(b"0rZ", b"Zbcdef")
+        session.send(b":w\r", b"Written")
+        session.send(b"l3" + mode + b"\x1b", b"1/1  col 1")
+        session.send(b":q\r", b"unsaved changes")
+        session.send(b"u:w\r", b"Written")
+        assert session.path.read_bytes() == b"Zbcdef\n"
+        session.send(b"0ll2.", b"1/1  col 2")
+        session.send(b":q\r", b"unsaved changes")
+        session.send(b"l.", b"1/1  col 2")
+    session.save_exit(b"Zbcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -389,7 +403,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, empty_input, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"QQQ\nabC\nZZZZ\nREG\n" if action == net_unchanged else b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")

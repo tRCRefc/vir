@@ -66,6 +66,8 @@ pub struct InputSession<'a> {
     prefix: String,
     actions: Vec<InputAction>,
     work: usize,
+    // Counted corrections can erase the recipe; that is not an empty session.
+    input_performed: bool,
     line_structure_changed: bool,
 }
 
@@ -106,6 +108,7 @@ impl<'a> InputSession<'a> {
             prefix: String::new(),
             actions: Vec::new(),
             work: 1,
+            input_performed: false,
             line_structure_changed,
         })
     }
@@ -251,6 +254,7 @@ impl<'a> InputSession<'a> {
             return Ok(());
         }
         self.work = work.unwrap_or(usize::MAX);
+        self.input_performed = true;
         self.record_action(action, erase_insert.is_some());
         Ok(())
     }
@@ -308,7 +312,13 @@ impl<'a> InputSession<'a> {
         if self.line_structure_changed {
             state.forget_line();
         }
-        state.publish_input(self.edit, self.start, self.actions, self.repetitions)
+        state.publish_input(
+            self.edit,
+            self.start,
+            self.actions,
+            self.repetitions,
+            expand && !self.input_performed,
+        )
     }
 }
 

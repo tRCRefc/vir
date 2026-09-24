@@ -188,7 +188,8 @@ overwrites once and inserts extra first-segment copies. Each dot is one undo.
 Movement, search, yank, undo, saving and ex commands do not replace the
 visual repeat record; file switches preserve it. Put repeats use the current
 unnamed register. Successful r replaces undo and the repeat record even
-when the characters match, and marks the buffer modified. Other net-unchanged
+when the characters match, and marks the buffer modified. Empty i/R sessions
+ended with Escape also replace undo/repeat and mark modified. Other net-unchanged
 edits, failed edits and cancelled edits preserve the repeat record. Replay
 errors leave text, registers, cursor and undo unchanged.
 Input replay expansion is limited to 1,000,000 work units (inserted bytes

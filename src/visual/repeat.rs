@@ -26,6 +26,10 @@ impl InputStart {
         }
     }
 
+    fn publishes_empty_input(&self) -> bool {
+        matches!(self, Self::Insert('i' | 'R'))
+    }
+
     fn normalized(self) -> Self {
         if self == Self::Insert('C') {
             Self::Change {
@@ -124,14 +128,15 @@ impl ChangeRecord {
 
 impl VisualState {
     /// Commit one live input session and publish its logical replay record only
-    /// when it changes the text. Dropping the TextEdit instead cancels both.
+    /// when it changes text or completes empty i/R. Dropping the edit cancels both.
     pub fn commit_input(
         &mut self,
         mut edit: TextEdit<'_>,
         start: InputStart,
     ) -> Result<(), String> {
         let actions = edit.take_input_actions();
-        self.publish_input(edit, start, actions, 1)
+        let empty_input = actions.is_empty();
+        self.publish_input(edit, start, actions, 1, empty_input)
     }
 
     pub(super) fn publish_input(
@@ -140,11 +145,17 @@ impl VisualState {
         start: InputStart,
         actions: Vec<InputAction>,
         repetitions: usize,
+        empty_input: bool,
     ) -> Result<(), String> {
+        let publish_empty = empty_input && start.publishes_empty_input();
         let changed = edit.has_changes();
-        let position = edit.commit()?;
+        let position = if publish_empty {
+            edit.commit_even_if_unchanged()?
+        } else {
+            edit.commit()?
+        };
         self.finish_insert(position);
-        if changed {
+        if changed || publish_empty {
             self.last_change = Some(ChangeRecord::Input {
                 start: start.normalized(),
                 actions,
@@ -155,7 +166,7 @@ impl VisualState {
     }
 
     /// Replay on private state, publishing text, register, cursor, undo and the
-    /// effective count together. Successful r also publishes identical text;
+    /// effective count together. Successful r and empty i/R publish identical text;
     /// other unchanged replays retain their existing publication policy.
     pub fn repeat_change(
         &mut self,
@@ -169,7 +180,13 @@ impl VisualState {
         let mut staged_editor = editor.clone();
         let mut staged_state = self.clone();
         change.apply(&mut staged_state, &mut staged_editor)?;
-        if matches!(change, ChangeRecord::Replace { .. })
+        let publish_empty = matches!(
+            &change,
+            ChangeRecord::Input { start, actions, .. }
+                if start.publishes_empty_input() && actions.is_empty()
+        );
+        if publish_empty
+            || matches!(change, ChangeRecord::Replace { .. })
             || staged_editor.buffer() != editor.buffer()
         {
             staged_state.last_change = Some(change);

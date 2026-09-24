@@ -472,7 +472,7 @@ impl TextEdit<'_> {
         self.commit_inner(false)
     }
 
-    /// Successful visual r replaces undo even when the characters match.
+    /// Publish a successful visual command whose semantics replace unchanged undo.
     pub(crate) fn commit_even_if_unchanged(self) -> Result<Position, String> {
         self.commit_inner(true)
     }

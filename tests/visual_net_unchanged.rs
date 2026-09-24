@@ -168,11 +168,10 @@ fn unchanged_dot_discards_register_cursor_and_explicit_count_together() {
 }
 
 #[test]
-fn empty_and_retracted_input_preserve_saved_state_undo_and_dot() {
+fn retracted_input_preserves_saved_state_undo_and_dot() {
     for saved in [false, true] {
         for lf in ["", "\n"] {
             for (mode, actions) in [
-                ('i', vec![]),
                 (
                     'i',
                     vec![InputAction::Insert("文".into()), InputAction::Backspace],
@@ -181,7 +180,6 @@ fn empty_and_retracted_input_preserve_saved_state_undo_and_dot() {
                     'i',
                     vec![InputAction::Insert("\n".into()), InputAction::Backspace],
                 ),
-                ('R', vec![]),
                 (
                     'R',
                     vec![InputAction::Replace('文'), InputAction::RestoreReplacement],
@@ -398,5 +396,71 @@ fn multiline_unchanged_dot_preserves_the_previous_transaction_and_line_snapshot(
             );
             assert_saved_text(&editor, &directory);
         }
+    }
+}
+
+#[test]
+fn empty_input_replaces_history_and_dot_even_after_saving() {
+    for mode in ['i', 'R'] {
+        for saved in [false, true] {
+            for lf in ["", "\n"] {
+                for count in [1, 3] {
+                    for column in [0, 1, 2] {
+                        let (_directory, mut editor, mut state) = fixture(saved, lf);
+                        state.column = column;
+                        let before = editor.buffer().clone();
+                        let register = editor.unnamed_register().cloned();
+                        state
+                            .begin_counted_insert(&mut editor, mode, count)
+                            .unwrap()
+                            .commit(&mut state)
+                            .unwrap();
+                        assert_eq!(editor.buffer(), &before);
+                        assert!(editor.is_modified());
+                        assert_eq!(state.column, column.saturating_sub(1));
+                        for _ in 0..2 {
+                            state.undo(&mut editor).unwrap();
+                            assert_eq!(editor.buffer(), &before);
+                        }
+                        // Replay at a different line must publish its cursor and undo,
+                        // rather than replay the older change or discard the empty result.
+                        state.row = 2;
+                        state.column = 2;
+                        state.repeat_change(&mut editor, Some(2)).unwrap();
+                        assert_eq!((state.row, state.column), (2, 1));
+                        assert_eq!(editor.buffer(), &before);
+                        state.undo(&mut editor).unwrap();
+                        assert_eq!(state.row, 2);
+                        assert_eq!(editor.buffer(), &before);
+                        state.column = 2;
+                        state.repeat_change(&mut editor, None).unwrap();
+                        assert_eq!(state.column, 1);
+                        assert_eq!(editor.unnamed_register(), register.as_ref());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn empty_legacy_input_commit_and_dropped_session_have_distinct_history() {
+    for mode in ['i', 'R'] {
+        let (_directory, mut editor, mut state) = fixture(true, "\n");
+        let before = editor.clone();
+        drop(state.begin_counted_insert(&mut editor, mode, 3).unwrap());
+        assert_eq!(editor, before);
+        assert_old_history(&editor, &state, "\n");
+        assert_old_repeat(&editor, &state);
+        let edit = state.begin_insert(&mut editor, mode).unwrap();
+        state.commit_input(edit, InputStart::Insert(mode)).unwrap();
+        assert!(editor.is_modified());
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer(), before.buffer());
+        state.row = 2;
+        state.column = 2;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(editor.buffer(), before.buffer());
+        assert_eq!(state.column, 1);
     }
 }

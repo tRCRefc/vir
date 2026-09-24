@@ -145,7 +145,9 @@ fn empty_cancelled_and_pasted_sessions_use_one_transaction() {
     input.apply_input(&InputAction::Backspace).unwrap();
     input.apply_input(&InputAction::Delete).unwrap();
     input.commit(&mut state).unwrap();
-    assert_eq!(editor, before);
+    assert_eq!(editor.buffer(), before.buffer());
+    assert!(editor.is_modified());
+    let before = editor.clone();
     {
         let mut input = state.begin_counted_insert(&mut editor, 'i', 3).unwrap();
         input.paste("X\r\nY").unwrap();
@@ -214,7 +216,7 @@ fn original_text_and_cross_line_backspace_remain_explicit_extensions() {
 }
 
 #[test]
-fn no_op_replace_backspace_at_maximum_count_preserves_previous_change() {
+fn no_op_replace_backspace_finishes_an_empty_session() {
     let mut editor = editor("abc");
     let mut state = VisualState::default();
     state.replace_character(&mut editor, 'Z').unwrap();
@@ -225,8 +227,11 @@ fn no_op_replace_backspace_at_maximum_count_preserves_previous_change() {
         .unwrap();
     input.apply_input(&InputAction::RestoreReplacement).unwrap();
     input.commit(&mut state).unwrap();
-    assert_eq!(editor, before);
+    assert_eq!(editor.buffer(), before.buffer());
     state.column = 1;
     state.repeat_change(&mut editor, None).unwrap();
-    assert_eq!(editor.buffer().to_text(), "ZZc");
+    assert_eq!(editor.buffer().to_text(), "Zbc");
+    assert_eq!(state.column, 0);
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "Zbc");
 }
