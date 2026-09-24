@@ -326,33 +326,22 @@ def open_undo_cursor(session):
 
 
 def net_unchanged(session):
-    session.send(b"3cl", b"[INSERT]")
-    session.send(b"ab", b"1/4  col 3")
+    session.send(b"3clab", b"[INSERT]")
     session.send(b"\x1b", b"[VIEW]")
     session.send(b":w\r", b"Written")
-    session.send(b"Gyy", b"4/4  col 1")
-    session.send(b"2G", b"2/4  col 1")
-    # Replaying with count two changes neither text nor the saved count of three.
-    session.send(b"2.", b"2/4  col 1")
-    session.send(b"j.", b"abZ")
-    session.send(b":w\r", b"Written")
-    assert session.path.read_bytes() == b"ab\nabC\nabZ\nREG\n"
+    session.send(b"Gyy2G", b"2/4  col 1")
+    # Identical replay publishes the new count, cursor, register and history.
+    session.send(b"2.", b"2/4  col 2")
+    session.send(b":q\r", b"unsaved changes")
+    session.send(b"u:w\r", b"Written")
+    assert session.path.read_bytes() == b"ab\nabC\nZZZZ\nREG\n"
+    session.send(b"j0.", b"abZZ")
     session.send(b"u", b"ZZZZ")
-    session.send(b"2G", b"2/4  col 1")
-    session.send(b"Gyy", b"4/4  col 1")
-    session.send(b"2G", b"2/4  col 1")
-    session.send(b"2.", b"2/4  col 1")
-    # The staged character register must not replace the previous line yank.
-    session.send(b"P", b"2/5  col 1")
-    session.send(b":w\r", b"Written")
-    assert session.path.read_bytes() == b"ab\nREG\nabC\nZZZZ\nREG\n"
-    session.send(b"u", b"1/4  col 1")
-    session.send(b":w\r", b"Written")
-    session.send(b"2G", b"2/4  col 1")
-    # Direct change publishes the captured characters even when text is identical.
-    session.send(b"2cl", b"[INSERT]")
-    session.send(b"ab", b"2/4  col 3")
-    session.send(b"\x1b", b"2/4  col 2")
+    session.send(b"2G0.0P", b"ababC")
+    session.send(b"u:w\r", b"Written")
+    assert session.path.read_bytes() == b"ab\nabC\nZZZZ\nREG\n"
+    session.send(b"2G02clab\x1b", b"2/4  col 2")
+    session.send(b":q\r", b"unsaved changes")
     session.send(b"0P", b"ababC")
     session.save_exit(b"ab\nababC\nZZZZ\nREG\n")
 

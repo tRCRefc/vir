@@ -194,7 +194,9 @@ single-line input whose newly typed characters were all erased with Backspace.
 Its dot recipe is empty. Single-line R also publishes undo/repeat and marks
 modified when it overwrites characters with the same text. Single-line
 i/a/I/A/R replay saves the text remaining after Backspace corrections.
-Other net-unchanged
+Completed change sessions also replace undo/repeat and mark modified when
+they reconstruct the original text; dot publishes the captured register,
+cursor and effective count even when the text matches. Other net-unchanged
 edits, failed edits and cancelled edits preserve the repeat record. Replay
 errors leave text, registers, cursor and undo unchanged.
 Input replay expansion is limited to 1,000,000 work units (inserted bytes

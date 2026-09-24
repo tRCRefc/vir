@@ -87,7 +87,7 @@ fn assert_saved_text(editor: &Editor, directory: &tempfile::TempDir) {
 }
 
 #[test]
-fn direct_unchanged_change_publishes_register_and_cursor_but_preserves_history() {
+fn direct_unchanged_change_publishes_register_cursor_and_history() {
     for saved in [false, true] {
         for lf in ["", "\n"] {
             for (motion, count, text, register, end) in [
@@ -122,15 +122,30 @@ fn direct_unchanged_change_publishes_register_and_cursor_but_preserves_history()
             ] {
                 let (directory, mut editor, mut state) = fixture(saved, lf);
                 let before = editor.buffer().clone();
-                let current = editor.current();
                 change(&mut state, &mut editor, motion, count, text);
                 assert_eq!(editor.buffer(), &before);
-                assert_eq!(editor.current(), current);
-                assert_eq!(editor.is_modified(), !saved);
+                assert_eq!(editor.current(), Some(end.0));
+                assert!(editor.is_modified());
                 assert_eq!(editor.unnamed_register(), Some(&register));
                 assert_eq!((state.row, state.column), end);
-                assert_old_history(&editor, &state, lf);
-                assert_old_repeat(&editor, &state);
+                let mut undone = editor.clone();
+                for _ in 0..2 {
+                    undone.undo().unwrap();
+                    assert_eq!(undone.buffer(), &before);
+                }
+                let mut repeated = editor.clone();
+                let mut repeat_state = state.clone();
+                repeat_state.row = 2;
+                repeat_state.column = 0;
+                repeat_state.repeat_change(&mut repeated, None).unwrap();
+                assert_eq!(
+                    repeated.buffer().line(2),
+                    Some(if motion == Some(Motion::Right) {
+                        "中🙂ZZ"
+                    } else {
+                        "中🙂C"
+                    })
+                );
                 assert_saved_text(&editor, &directory);
                 // Vertical navigation exposes the session's preferred column.
                 state.move_cursor(Motion::Down, editor.buffer(), 8);
@@ -145,24 +160,38 @@ fn direct_unchanged_change_publishes_register_and_cursor_but_preserves_history()
 }
 
 #[test]
-fn unchanged_dot_discards_register_cursor_and_explicit_count_together() {
+fn unchanged_dot_publishes_register_cursor_and_explicit_count_together() {
     for saved in [false, true] {
         for lf in ["", "\n"] {
             let (directory, mut editor, mut state) = fixture(saved, lf);
-            let before = editor.clone();
-            let visual = format!("{state:?}");
+            let before = editor.buffer().clone();
             for _ in 0..2 {
+                state.column = 0;
                 state.repeat_change(&mut editor, Some(2)).unwrap();
-                assert_eq!(editor, before);
-                assert_eq!(format!("{state:?}"), visual);
+                assert_eq!(editor.buffer(), &before);
+                assert!(editor.is_modified());
+                assert_eq!(state.column, 1);
+                assert_eq!(
+                    editor.unnamed_register(),
+                    Some(&Register::Characters("中🙂".into()))
+                );
+                for _ in 0..2 {
+                    state.undo(&mut editor).unwrap();
+                    assert_eq!(editor.buffer(), &before);
+                }
             }
-            assert_old_history(&editor, &state, lf);
-            assert_old_repeat(&editor, &state);
             assert_saved_text(&editor, &directory);
-            // The old line register is still usable; the staged character register is absent.
+            let mut repeat_editor = editor.clone();
+            let mut repeat_state = state.clone();
+            repeat_state.row = 2;
+            repeat_state.column = 0;
+            repeat_state
+                .repeat_change(&mut repeat_editor, None)
+                .unwrap();
+            assert_eq!(repeat_editor.buffer().line(2), Some("中🙂ZZ"));
+            state.column = 0;
             state.put(&mut editor, true, 1).unwrap();
-            assert_eq!(editor.buffer().line(1), Some("REG"));
-            assert_eq!(editor.buffer().line(2), Some("中🙂C"));
+            assert_eq!(editor.buffer().line(1), Some("中🙂中🙂C"));
         }
     }
 }
@@ -356,7 +385,7 @@ fn retracted_split_invalidates_u_only_for_the_direct_input_session() {
 }
 
 #[test]
-fn multiline_unchanged_dot_preserves_the_previous_transaction_and_line_snapshot() {
+fn multiline_unchanged_dot_replaces_history_and_register() {
     for saved in [false, true] {
         for lf in ["", "\n"] {
             let directory = tempfile::tempdir().unwrap();
@@ -375,17 +404,18 @@ fn multiline_unchanged_dot_preserves_the_previous_transaction_and_line_snapshot(
             }
             state.checkpoint_line(&editor);
             let before = editor.clone();
-            let visual = format!("{state:?}");
             state.repeat_change(&mut editor, None).unwrap();
-            assert_eq!(editor, before);
-            assert_eq!(format!("{state:?}"), visual);
-            state.undo(&mut editor).unwrap();
-            assert_eq!(editor.buffer().to_text(), original);
-            state.undo(&mut editor).unwrap();
             assert_eq!(editor.buffer(), before.buffer());
+            assert!(editor.is_modified());
+            assert_eq!((state.row, state.column), (3, 0));
+            for _ in 0..2 {
+                state.undo(&mut editor).unwrap();
+                assert_eq!(editor.buffer(), before.buffer());
+                assert_eq!(state.row, 2);
+            }
             assert_eq!(
                 editor.unnamed_register(),
-                Some(&Register::Lines(vec!["REG".into()]))
+                Some(&Register::Characters("中\n🙂".into()))
             );
             assert_saved_text(&editor, &directory);
         }
@@ -752,4 +782,33 @@ fn identical_replace_dot_publishes_explicit_count_and_saved_state() {
         state.undo(&mut editor).unwrap();
         assert_eq!(editor.buffer(), &before);
     }
+}
+
+#[test]
+fn unchanged_c_entry_normalizes_corrections_and_preserves_failures() {
+    let (directory, mut editor, mut state) = fixture(true, "\n");
+    state.column = 1;
+    let before = editor.buffer().clone();
+    let mut input = state.begin_counted_insert(&mut editor, 'C', 1).unwrap();
+    input.paste("🙂CX").unwrap();
+    input.apply_input(&InputAction::Backspace).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer(), &before);
+    assert!(editor.is_modified());
+    assert_eq!(
+        editor.unnamed_register(),
+        Some(&Register::Characters("🙂C".into()))
+    );
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer(), &before);
+    let published = editor.clone();
+    let visual = format!("{state:?}");
+    assert!(state.repeat_change(&mut editor, Some(usize::MAX)).is_err());
+    assert_eq!(editor, published);
+    assert_eq!(format!("{state:?}"), visual);
+    state.row = 2;
+    state.column = 1;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().line(2), Some("Z🙂C"));
+    assert_saved_text(&editor, &directory);
 }

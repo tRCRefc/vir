@@ -26,9 +26,13 @@ impl InputStart {
         }
     }
 
+    fn is_change(&self) -> bool {
+        matches!(self, Self::Change { .. } | Self::Insert('C'))
+    }
+
     fn supports_single_line_input(&self) -> bool {
         // These commands share historical insrt, which saves undo before input.
-        matches!(self, Self::Insert('i' | 'a' | 'I' | 'A' | 'R'))
+        self.is_change() || matches!(self, Self::Insert('i' | 'a' | 'I' | 'A' | 'R'))
     }
 
     // Historical vgetline erases from genbuf before vappend saves INS.
@@ -181,7 +185,7 @@ impl VisualState {
         let input = completed
             .then(|| start.single_line_input(&actions))
             .flatten();
-        let publish_input = input.is_some();
+        let publish_input = completed && (input.is_some() || start.is_change());
         if let Some(text) = input {
             actions.clear();
             if !text.is_empty() {
@@ -226,7 +230,7 @@ impl VisualState {
         let publish_input = matches!(
             &change,
             ChangeRecord::Input { start, actions, .. }
-                if start.single_line_input(actions).is_some()
+                if start.is_change() || start.single_line_input(actions).is_some()
         );
         if publish_input
             || matches!(change, ChangeRecord::Replace { .. })
