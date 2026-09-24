@@ -112,7 +112,7 @@ fn rejected_input_is_atomic_and_backspace_frees_utf8_budget() {
     assert_eq!(editor, before);
 }
 #[test]
-fn cancelled_and_net_unchanged_sessions_preserve_previous_record() {
+fn dropped_replace_preserves_history_but_completed_erasure_replaces_it() {
     let mut editor = editor("abc");
     let mut state = VisualState::default();
     state.replace_character(&mut editor, 'Z').unwrap();
@@ -126,8 +126,10 @@ fn cancelled_and_net_unchanged_sessions_preserve_previous_record() {
     input.apply_input(&InputAction::Replace('X')).unwrap();
     input.apply_input(&InputAction::RestoreReplacement).unwrap();
     input.commit(&mut state).unwrap();
-    assert_eq!(editor, before);
+    assert_eq!(editor.buffer(), before.buffer());
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer(), before.buffer());
     state.column = 1;
     state.repeat_change(&mut editor, None).unwrap();
-    assert_eq!(editor.buffer().to_text(), "ZZc");
+    assert_eq!(editor.buffer().to_text(), "Zbc");
 }

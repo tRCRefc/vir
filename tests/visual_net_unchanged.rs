@@ -168,21 +168,13 @@ fn unchanged_dot_discards_register_cursor_and_explicit_count_together() {
 }
 
 #[test]
-fn retracted_input_preserves_saved_state_undo_and_dot() {
+fn retracted_multiline_input_preserves_saved_state_undo_and_dot() {
     for saved in [false, true] {
         for lf in ["", "\n"] {
             for (mode, actions) in [
                 (
                     'i',
-                    vec![InputAction::Insert("文".into()), InputAction::Backspace],
-                ),
-                (
-                    'i',
                     vec![InputAction::Insert("\n".into()), InputAction::Backspace],
-                ),
-                (
-                    'R',
-                    vec![InputAction::Replace('文'), InputAction::RestoreReplacement],
                 ),
                 (
                     'R',
@@ -317,7 +309,8 @@ fn retracted_split_invalidates_u_only_for_the_direct_input_session() {
                     .unwrap();
                 session.apply_input(&retract).unwrap();
                 session.commit(&mut unsplit_state).unwrap();
-                assert_eq!(unsplit_editor, before);
+                assert_eq!(unsplit_editor.buffer(), before.buffer());
+                assert!(unsplit_editor.is_modified());
                 unsplit_state.restore_line(&mut unsplit_editor).unwrap();
                 assert_eq!(unsplit_editor.buffer().to_text(), format!("abc{lf}"));
 
@@ -546,4 +539,107 @@ fn empty_append_and_first_nonblank_replay_recompute_entry_positions() {
             assert_eq!(editor.unnamed_register(), register.as_ref());
         }
     }
+}
+
+#[test]
+fn fully_retracted_single_line_input_publishes_an_empty_repeat() {
+    for mode in ['i', 'a', 'I', 'A', 'R'] {
+        for count in [1, 3] {
+            for saved in [false, true] {
+                for lf in ["", "\n"] {
+                    let (_directory, mut editor, mut state) = fixture(saved, lf);
+                    state.column = 1;
+                    let before = editor.buffer().clone();
+                    let register = editor.unnamed_register().cloned();
+                    let mut input = state
+                        .begin_counted_insert(&mut editor, mode, count)
+                        .unwrap();
+                    let typed = if mode == 'R' {
+                        InputAction::ReplaceText("文🙂".into())
+                    } else {
+                        InputAction::Insert("文🙂".into())
+                    };
+                    let erase = if mode == 'R' {
+                        InputAction::RestoreReplacement
+                    } else {
+                        InputAction::Backspace
+                    };
+                    // Repeat the cycle to cover retyping after returning to the entry.
+                    for _ in 0..2 {
+                        input.apply_input(&typed).unwrap();
+                        input.apply_input(&erase).unwrap();
+                        input.apply_input(&erase).unwrap();
+                    }
+                    input.commit(&mut state).unwrap();
+                    assert_eq!(editor.buffer(), &before);
+                    assert!(editor.is_modified());
+                    assert_eq!(
+                        state.column,
+                        match mode {
+                            'a' => 1,
+                            'A' => 2,
+                            _ => 0,
+                        }
+                    );
+                    for _ in 0..2 {
+                        state.undo(&mut editor).unwrap();
+                        assert_eq!(editor.buffer(), &before);
+                    }
+                    state.row = 2;
+                    state.column = 1;
+                    // Empty historical INS remains cheap even if all removed text
+                    // would exceed the replay budget with this new count.
+                    state.repeat_change(&mut editor, Some(1_000_000)).unwrap();
+                    assert_eq!(editor.buffer(), &before);
+                    assert_eq!(
+                        state.column,
+                        match mode {
+                            'a' => 1,
+                            'A' => 3,
+                            _ => 0,
+                        }
+                    );
+                    assert_eq!(editor.unnamed_register(), register.as_ref());
+                    state.repeat_change(&mut editor, None).unwrap();
+                    assert_eq!(editor.buffer(), &before);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_retracted_input_publishes_history_but_original_text_erasure_does_not() {
+    for mode in ['i', 'a', 'I', 'A', 'R'] {
+        let (_directory, mut editor, mut state) = fixture(true, "\n");
+        let before = editor.buffer().clone();
+        let mut edit = state.begin_insert(&mut editor, mode).unwrap();
+        if mode == 'R' {
+            edit.replace_input('文').unwrap();
+            edit.replace_backspace().unwrap();
+        } else {
+            edit.insert("文").unwrap();
+            edit.backspace().unwrap();
+        }
+        state.commit_input(edit, InputStart::Insert(mode)).unwrap();
+        assert!(editor.is_modified());
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer(), &before);
+        state.row = 2;
+        state.repeat_change(&mut editor, Some(1_000_000)).unwrap();
+        assert_eq!(editor.buffer(), &before);
+    }
+    // Deleting original text then rebuilding it is not vgetline erasure.
+    let (_directory, mut editor, mut state) = fixture(true, "\n");
+    state.column = 1;
+    let before = editor.clone();
+    let mut input = state.begin_counted_insert(&mut editor, 'i', 1).unwrap();
+    input.apply_input(&InputAction::Backspace).unwrap();
+    input
+        .apply_input(&InputAction::Insert("中".into()))
+        .unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor, before);
+    assert_old_history(&editor, &state, "\n");
+    assert_old_repeat(&editor, &state);
 }

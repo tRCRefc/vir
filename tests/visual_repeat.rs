@@ -221,17 +221,13 @@ fn failed_cancelled_and_net_unchanged_edits_keep_the_previous_record() {
     let before = editor.clone();
     drop(state.begin_insert(&mut editor, 'o').unwrap());
     assert_eq!(editor, before);
-    input(
-        &mut state,
-        &mut editor,
-        InputStart::Insert('i'),
-        &[InputAction::Insert("x".into()), InputAction::Backspace],
-    );
+    // Typing an identical character without erasing it remains a separate
+    // net-unchanged case, pending the broader Replace-session review.
     input(
         &mut state,
         &mut editor,
         InputStart::Insert('R'),
-        &[InputAction::Replace('Q'), InputAction::RestoreReplacement],
+        &[InputAction::Replace('Z')],
     );
     state.row = 1;
     state.column = 0;

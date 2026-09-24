@@ -31,6 +31,31 @@ impl InputStart {
         matches!(self, Self::Insert('i' | 'a' | 'I' | 'A' | 'R'))
     }
 
+    // Historical vgetline erases from genbuf before vappend saves INS.
+    // Only recognize complete erasure within the input segment: deleting old
+    // text or crossing LF uses the project's separate, extended input rules.
+    fn has_empty_input(&self, actions: &[InputAction]) -> bool {
+        if !self.publishes_empty_input() {
+            return false;
+        }
+        let replace = *self == Self::Insert('R');
+        actions
+            .iter()
+            .try_fold(0usize, |length, action| match action {
+                InputAction::Insert(text) if !replace && !text.contains('\n') => {
+                    length.checked_add(text.chars().count())
+                }
+                InputAction::ReplaceText(text) if replace && !text.contains('\n') => {
+                    length.checked_add(text.chars().count())
+                }
+                InputAction::Replace(c) if replace && *c != '\n' => length.checked_add(1),
+                InputAction::Backspace if !replace => length.checked_sub(1),
+                InputAction::RestoreReplacement if replace => length.checked_sub(1),
+                _ => None,
+            })
+            == Some(0)
+    }
+
     fn normalized(self) -> Self {
         if self == Self::Insert('C') {
             Self::Change {
@@ -129,27 +154,30 @@ impl ChangeRecord {
 
 impl VisualState {
     /// Commit one live input session and publish its logical replay record only
-    /// when it changes text or completes empty i/a/I/A/R. Dropping the edit cancels both.
+    /// when it changes text or completes empty/fully erased i/a/I/A/R input.
+    /// Dropping the edit cancels both.
     pub fn commit_input(
         &mut self,
         mut edit: TextEdit<'_>,
         start: InputStart,
     ) -> Result<(), String> {
         let actions = edit.take_input_actions();
-        let empty_input = actions.is_empty();
-        self.publish_input(edit, start, actions, 1, empty_input)
+        self.publish_input(edit, start, actions, 1, true)
     }
 
     pub(super) fn publish_input(
         &mut self,
         edit: TextEdit<'_>,
         start: InputStart,
-        actions: Vec<InputAction>,
+        mut actions: Vec<InputAction>,
         repetitions: usize,
-        empty_input: bool,
+        completed: bool,
     ) -> Result<(), String> {
-        let publish_empty = empty_input && start.publishes_empty_input();
         let changed = edit.has_changes();
+        let publish_empty = completed && !changed && start.has_empty_input(&actions);
+        if publish_empty {
+            actions.clear();
+        }
         let position = if publish_empty {
             edit.commit_even_if_unchanged()?
         } else {

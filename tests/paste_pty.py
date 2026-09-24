@@ -389,6 +389,21 @@ def empty_input(session):
     session.save_exit(b"Zbcdef\n")
 
 
+def erased_input(session):
+    for mode in [b"i", b"a", b"I", b"A", b"R"]:
+        for count in [b"", b"3"]:
+            session.send(b"0rZ:w\r", b"Written")
+            session.send(b"0l" + count + mode + b"XY\x7f\x7f\x1b", b"[VIEW]")
+            session.send(b":q\r", b"unsaved changes")
+            session.send(b"u:w\r", b"Written")
+            assert session.path.read_bytes() == b"Zbcdef\n"
+            # Fully erased input must replay as empty INS, not the old rZ.
+            session.send(b"0ll1000000.", b"[+]")
+            session.send(b":w\r", b"Written")
+            assert session.path.read_bytes() == b"Zbcdef\n"
+    session.save_exit(b"Zbcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -406,7 +421,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, empty_input, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, empty_input, erased_input, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"QQQ\nabC\nZZZZ\nREG\n" if action == net_unchanged else b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")
