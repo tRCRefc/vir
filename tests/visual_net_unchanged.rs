@@ -352,18 +352,15 @@ fn retracted_split_invalidates_u_only_for_the_direct_input_session() {
                 session.apply_input(&retract).unwrap();
                 session.commit(&mut direct_state).unwrap();
                 assert_eq!(direct_editor, before);
-                assert_eq!(
-                    direct_state.restore_line(&mut direct_editor).unwrap_err(),
-                    "no line changes to restore"
-                );
-                assert_eq!(direct_editor, before);
-                let cursor = (direct_state.row, direct_state.column);
-                assert!(direct_state.restore_line(&mut direct_editor).is_err());
-                assert_eq!((direct_state.row, direct_state.column), cursor);
-                direct_state.undo(&mut direct_editor).unwrap();
-                assert_eq!(direct_editor.buffer().to_text(), format!("abc{lf}"));
-                direct_state.undo(&mut direct_editor).unwrap();
+                // The reset snapshot is the current line; U may now publish
+                // an identical edit but cannot recover the pre-split visit.
+                direct_state.restore_line(&mut direct_editor).unwrap();
                 assert_eq!(direct_editor.buffer(), before.buffer());
+                assert!(direct_state.restore_line(&mut direct_editor).is_err());
+                for _ in 0..2 {
+                    direct_state.undo(&mut direct_editor).unwrap();
+                    assert_eq!(direct_editor.buffer(), before.buffer());
+                }
 
                 // The identical split/join on a staged replay must not discard U's snapshot.
                 state.repeat_change(&mut editor, None).unwrap();

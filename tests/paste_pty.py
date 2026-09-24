@@ -267,13 +267,13 @@ def line_undo(session):
     session.send(b"U", b"abcdef")
     session.send(b"u", b"aYcdef")
     session.send(b"j", b"2/2")
-    session.send(b"kU", b"no line changes to restore")
+    session.send(b"kU", b"aYcdef")
     session.send(b"0rZ", b"ZYcdef")
     session.send(b"i\r\x7f", b"ZYcdef")
     session.send(b"\x1b", b"[VIEW]")
-    session.send(b"U", b"no line changes to restore")
+    session.send(b"U", b"ZYcdef")
     session.send(b":e!\r", b"aYcdef")
-    session.send(b"U", b"no line changes to restore")
+    session.send(b"U", b"aYcdef")
     session.send(b"g0rQ", b"QYcdef")
     fcntl.ioctl(session.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6, 150, 0, 0))
     receive(session.master, b"\x1b[6;1H[VIEW]")
@@ -292,7 +292,7 @@ def undo_cursor(session):
     session.send(b"0u", b"col 4")
     session.send(b"2dh", b"adef")
     session.send(b"$u", b"col 2")
-    session.send(b"U", b"no line changes to restore")
+    session.send(b"U", b"1/1  col 1")
     session.save_exit(b"abcdef\n")
 
 
@@ -405,6 +405,25 @@ def identical_replace_input(session):
     session.save_exit(b"ZbcdeZbZb\n")
 
 
+def unchanged_u(session):
+    session.send(b"llU", b"1/1  col 1")
+    session.send(b"U", b"no line changes to restore")
+    session.send(b"uU", b"[+]")
+    session.send(b":q\r", b"unsaved changes")
+    session.send(b"U", b"1/1  col 1")
+    session.send(b":w\r", b"Written")
+    assert session.path.read_bytes() == b"abcdef\n"
+    session.send(b"U", b"[+]")
+    session.send(b"U", b"no line changes to restore")
+    session.send(b":", b":")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"U", b"[+]")
+    session.send(b"/", b"/")
+    session.send(b"\x1b", b"[VIEW]")
+    session.send(b"U", b"[+]")
+    session.save_exit(b"abcdef\n")
+
+
 def crash(session):
     session.send(b"R", b"[REPLACE]")
     session.paste("中\n文".encode(), "文cdef".encode())
@@ -422,7 +441,7 @@ def crash(session):
 
 
 with tempfile.TemporaryDirectory(prefix="vir-paste-") as temporary:
-    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, empty_input, erased_input, identical_replace_input, crash]:
+    for action in [insert, replace, normal, pending_and_command, oversized, counted_open, counted_replace, quoted_input, special_r, quoted_r, backspace_at_limit, line_undo, undo_cursor, line_undo_cursor, open_undo_cursor, net_unchanged, identical_r, empty_input, erased_input, identical_replace_input, unchanged_u, crash]:
         directory = Path(temporary) / action.__name__
         directory.mkdir()
         session = Session(directory, b"QQQ\nabC\nZZZZ\nREG\n" if action == net_unchanged else b"tail\n" if action == insert else b"abcdef\nsecond\n" if action == line_undo else b"  one\n  two\nthree\n" if action in [line_undo_cursor, open_undo_cursor] else b"abcdef\n")

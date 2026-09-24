@@ -11,6 +11,7 @@ impl VisualState {
     /// Execute a supported ex command, then adopt its cursor before the next redraw.
     /// The caller must synchronize Editor.current with the visual row before entry.
     pub fn execute_ex(&mut self, text: &str, editor: &mut Editor) -> Result<ResultValue, String> {
+        self.sync_line_undo();
         let parsed = parse(text).map_err(|e| e.to_string())?;
         let command = parsed.command;
         if !matches!(

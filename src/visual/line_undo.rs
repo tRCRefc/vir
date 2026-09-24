@@ -13,6 +13,7 @@ pub(super) struct LineUndo {
     row: usize,
     original: Option<String>,
     consumed: bool,
+    generation: u64,
 }
 
 impl LineUndo {
@@ -29,7 +30,7 @@ impl LineUndo {
         if !same_line {
             self.original = buffer.line(row).map(str::to_owned);
             self.consumed = false;
-        } else if self.observed.as_ref() != Some(buffer) {
+        } else if self.generation != editor.edit_generation() {
             self.consumed = false;
         }
         if self.observed.as_ref() != Some(buffer) {
@@ -37,6 +38,7 @@ impl LineUndo {
         }
         self.path = editor.path().map(PathBuf::from);
         self.row = row;
+        self.generation = editor.edit_generation();
     }
 }
 
@@ -53,6 +55,12 @@ impl VisualState {
         self.line_undo = LineUndo::default();
     }
 
+    /// Historical vsave converts VCAPU before entering ex/search, including a
+    /// cancelled prompt. The visit snapshot and ordinary undo remain available.
+    pub(super) fn sync_line_undo(&mut self) {
+        self.line_undo.consumed = false;
+    }
+
     /// Restore this visit's initial line as one ordinary reversible transaction.
     /// U does not replace the last logical edit used by dot.
     pub fn restore_line(&mut self, editor: &mut Editor) -> Result<(), String> {
@@ -63,7 +71,7 @@ impl VisualState {
             .as_ref()
             .ok_or("no line to restore")?;
         let current = editor.buffer().line(self.row).ok_or("no line to restore")?;
-        if self.line_undo.consumed || current == original {
+        if self.line_undo.consumed {
             return Err("no line changes to restore".into());
         }
         let end = Position {
@@ -82,7 +90,7 @@ impl VisualState {
             end,
         )?;
         edit.insert(original)?;
-        edit.commit()?;
+        edit.commit_even_if_unchanged()?;
         self.column = 0;
         self.preferred_column = 0;
         self.left = 0;

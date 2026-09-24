@@ -27,6 +27,7 @@ pub struct Editor {
     last_search: Option<String>,
     undo: Option<(TextBuffer, Option<usize>)>,
     undo_location: Option<UndoLocation>,
+    edit_generation: u64,
 }
 
 impl Editor {
@@ -128,7 +129,14 @@ impl Editor {
         self.undo_location = None;
         self.current = current;
         self.modified = true;
+        self.edit_generation = self.edit_generation.wrapping_add(1);
         Ok(())
+    }
+
+    /// Command publication, including text-identical edits and undo. Saves and
+    /// cursor movement do not advance it. Used by visual U's consecutive-use guard.
+    pub(crate) fn edit_generation(&self) -> u64 {
+        self.edit_generation
     }
 
     /// Optional text location associated with the next direction of undo.
@@ -154,6 +162,7 @@ impl Editor {
             location.reverse();
         }
         self.modified = true;
+        self.edit_generation = self.edit_generation.wrapping_add(1);
         Ok(())
     }
 

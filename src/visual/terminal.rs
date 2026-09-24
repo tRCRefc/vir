@@ -565,11 +565,13 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 }
 
                 if key.code == KeyCode::Char(':') {
+                    state.sync_line_undo();
                     command.input = Some(String::new());
                     command.search_direction = None;
                     continue;
                 }
                 if key.code == KeyCode::Char('/') || key.code == KeyCode::Char('?') {
+                    state.sync_line_undo();
                     command.input = Some(String::new());
                     command.search_direction = Some(key.code == KeyCode::Char('/'));
                     continue;

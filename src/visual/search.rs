@@ -10,12 +10,14 @@ impl VisualState {
         pattern: &str,
         forward: bool,
     ) -> Result<(), String> {
+        self.sync_line_undo();
         self.find(editor, pattern, forward)?;
         self.search_forward = Some(forward);
         Ok(())
     }
 
     pub fn repeat_search(&mut self, editor: &mut Editor, reverse: bool) -> Result<(), String> {
+        self.sync_line_undo();
         self.find(editor, "", self.search_forward.unwrap_or(true) ^ reverse)
     }
 

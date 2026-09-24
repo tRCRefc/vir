@@ -171,7 +171,9 @@ character p/P into a nonempty buffer use that nonblank rule in both directions.
 Other multiline edits keep prior placement; :u uses ex row/column 1.
 U restores the current line to its initial text for this visit, at column 1.
 Leaving the line, structural edits or successful :e/:d/:s reset that baseline.
-U is one undoable edit; a second U reports no changes and preserves u.
+U is an undoable edit even when the line already matches; an immediate
+second U reports no changes and preserves u. A successful edit or u enables
+U again, as do : and search commands (including cancelled prompts).
 U keeps registers and the dot-repeat record; counts are unsupported.
 In Insert/change/R, Ctrl-V or Ctrl-Q quotes the next character: Esc and
 Ctrl-C become text; Enter/Ctrl-J/Ctrl-M split with LF. Quoted NUL is rejected.
