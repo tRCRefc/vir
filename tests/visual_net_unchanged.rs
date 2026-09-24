@@ -401,7 +401,7 @@ fn multiline_unchanged_dot_preserves_the_previous_transaction_and_line_snapshot(
 
 #[test]
 fn empty_input_replaces_history_and_dot_even_after_saving() {
-    for mode in ['i', 'R'] {
+    for mode in ['i', 'a', 'I', 'A', 'R'] {
         for saved in [false, true] {
             for lf in ["", "\n"] {
                 for count in [1, 3] {
@@ -417,7 +417,15 @@ fn empty_input_replaces_history_and_dot_even_after_saving() {
                             .unwrap();
                         assert_eq!(editor.buffer(), &before);
                         assert!(editor.is_modified());
-                        assert_eq!(state.column, column.saturating_sub(1));
+                        assert_eq!(
+                            state.column,
+                            match mode {
+                                'a' => column,
+                                'I' => 0,
+                                'A' => 2,
+                                _ => column.saturating_sub(1),
+                            }
+                        );
                         for _ in 0..2 {
                             state.undo(&mut editor).unwrap();
                             assert_eq!(editor.buffer(), &before);
@@ -427,14 +435,33 @@ fn empty_input_replaces_history_and_dot_even_after_saving() {
                         state.row = 2;
                         state.column = 2;
                         state.repeat_change(&mut editor, Some(2)).unwrap();
-                        assert_eq!((state.row, state.column), (2, 1));
+                        assert_eq!(
+                            (state.row, state.column),
+                            (
+                                2,
+                                match mode {
+                                    'a' => 2,
+                                    'I' => 0,
+                                    'A' => 3,
+                                    _ => 1,
+                                }
+                            )
+                        );
                         assert_eq!(editor.buffer(), &before);
                         state.undo(&mut editor).unwrap();
                         assert_eq!(state.row, 2);
                         assert_eq!(editor.buffer(), &before);
                         state.column = 2;
                         state.repeat_change(&mut editor, None).unwrap();
-                        assert_eq!(state.column, 1);
+                        assert_eq!(
+                            state.column,
+                            match mode {
+                                'a' => 2,
+                                'I' => 0,
+                                'A' => 3,
+                                _ => 1,
+                            }
+                        );
                         assert_eq!(editor.unnamed_register(), register.as_ref());
                     }
                 }
@@ -445,7 +472,7 @@ fn empty_input_replaces_history_and_dot_even_after_saving() {
 
 #[test]
 fn empty_legacy_input_commit_and_dropped_session_have_distinct_history() {
-    for mode in ['i', 'R'] {
+    for mode in ['i', 'a', 'I', 'A', 'R'] {
         let (_directory, mut editor, mut state) = fixture(true, "\n");
         let before = editor.clone();
         drop(state.begin_counted_insert(&mut editor, mode, 3).unwrap());
@@ -461,6 +488,62 @@ fn empty_legacy_input_commit_and_dropped_session_have_distinct_history() {
         state.column = 2;
         state.repeat_change(&mut editor, None).unwrap();
         assert_eq!(editor.buffer(), before.buffer());
-        assert_eq!(state.column, 1);
+        assert_eq!(
+            state.column,
+            match mode {
+                'a' => 2,
+                'I' => 0,
+                'A' => 3,
+                _ => 1,
+            }
+        );
+    }
+}
+
+#[test]
+fn empty_append_and_first_nonblank_replay_recompute_entry_positions() {
+    for (mode, direct_column, replay_column) in [('a', 3, 1), ('I', 1, 0), ('A', 4, 4)] {
+        for count in [1, 3] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut editor =
+                Editor::from_buffer(TextBuffer::from_text("  ab中\n\t🙂xyz\nREG\n").unwrap());
+            let mut state = VisualState::default();
+            state.replace_character(&mut editor, ' ').unwrap();
+            state.row = 2;
+            state.yank(&mut editor, None, Some(1)).unwrap();
+            state.row = 0;
+            state.column = 3;
+            editor
+                .write_to(Some(&directory.path().join("text")))
+                .unwrap();
+            let before = editor.buffer().clone();
+            let register = editor.unnamed_register().cloned();
+            state
+                .begin_counted_insert(&mut editor, mode, count)
+                .unwrap()
+                .commit(&mut state)
+                .unwrap();
+            assert_eq!(state.column, direct_column);
+            assert!(editor.is_modified());
+            assert_eq!(editor.buffer(), &before);
+            editor.save().unwrap();
+            state.row = 1;
+            state.column = 1;
+            let saved = editor.clone();
+            let visual = format!("{state:?}");
+            assert!(state.repeat_change(&mut editor, Some(usize::MAX)).is_err());
+            assert_eq!(editor, saved);
+            assert_eq!(format!("{state:?}"), visual);
+            state.repeat_change(&mut editor, Some(2)).unwrap();
+            assert_eq!(state.column, replay_column);
+            assert!(editor.is_modified());
+            assert_eq!(editor.buffer(), &before);
+            for _ in 0..2 {
+                state.undo(&mut editor).unwrap();
+                assert_eq!(editor.buffer(), &before);
+                assert_eq!(state.row, 1);
+            }
+            assert_eq!(editor.unnamed_register(), register.as_ref());
+        }
     }
 }

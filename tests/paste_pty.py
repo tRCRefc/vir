@@ -373,16 +373,19 @@ def identical_r(session):
 
 
 def empty_input(session):
-    for mode in [b"i", b"R"]:
+    for mode, direct_column, repeat_column in [
+        (b"i", b"1", b"2"), (b"R", b"1", b"2"),
+        (b"a", b"2", b"3"), (b"I", b"1", b"1"), (b"A", b"6", b"6"),
+    ]:
         session.send(b"0rZ", b"Zbcdef")
         session.send(b":w\r", b"Written")
-        session.send(b"l3" + mode + b"\x1b", b"1/1  col 1")
+        session.send(b"l3" + mode + b"\x1b", b"1/1  col " + direct_column)
         session.send(b":q\r", b"unsaved changes")
         session.send(b"u:w\r", b"Written")
         assert session.path.read_bytes() == b"Zbcdef\n"
-        session.send(b"0ll2.", b"1/1  col 2")
+        session.send(b"0ll2.", b"1/1  col " + repeat_column)
         session.send(b":q\r", b"unsaved changes")
-        session.send(b"l.", b"1/1  col 2")
+        session.send(b"0ll.", b"1/1  col " + repeat_column)
     session.save_exit(b"Zbcdef\n")
 
 

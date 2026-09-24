@@ -27,7 +27,8 @@ impl InputStart {
     }
 
     fn publishes_empty_input(&self) -> bool {
-        matches!(self, Self::Insert('i' | 'R'))
+        // These commands share historical insrt, which saves undo before input.
+        matches!(self, Self::Insert('i' | 'a' | 'I' | 'A' | 'R'))
     }
 
     fn normalized(self) -> Self {
@@ -128,7 +129,7 @@ impl ChangeRecord {
 
 impl VisualState {
     /// Commit one live input session and publish its logical replay record only
-    /// when it changes text or completes empty i/R. Dropping the edit cancels both.
+    /// when it changes text or completes empty i/a/I/A/R. Dropping the edit cancels both.
     pub fn commit_input(
         &mut self,
         mut edit: TextEdit<'_>,
@@ -166,7 +167,7 @@ impl VisualState {
     }
 
     /// Replay on private state, publishing text, register, cursor, undo and the
-    /// effective count together. Successful r and empty i/R publish identical text;
+    /// effective count together. Successful r and empty i/a/I/A/R publish identical text;
     /// other unchanged replays retain their existing publication policy.
     pub fn repeat_change(
         &mut self,
