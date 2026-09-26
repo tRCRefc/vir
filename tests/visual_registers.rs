@@ -146,7 +146,7 @@ fn register_survives_file_switch_and_can_be_pasted() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("copy\n").unwrap());
     let mut state = VisualState::default();
     state.yank(&mut editor, None, None).unwrap();
-    editor.load_with_force(&path, false).unwrap();
+    editor.load_with_force(&path, true).unwrap();
     state.put(&mut editor, false, 1).unwrap();
     assert_eq!(editor.buffer().to_text(), "other\ncopy\n");
 }
@@ -221,4 +221,31 @@ fn dot_replay_keeps_named_delete_selection() {
         Some(&Register::Lines(vec!["two".into()]))
     );
     assert_eq!(editor.buffer().to_text(), "three\n");
+}
+
+#[test]
+fn named_registers_survive_undo_and_file_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("other");
+    std::fs::write(&path, "disk\n").unwrap();
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut state = VisualState::default();
+    state
+        .yank_register(&mut editor, None, Some(1), Some('a'))
+        .unwrap();
+    state.delete_lines(&mut editor, 1).unwrap();
+    editor.undo().unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+    editor.load_with_force(&path, true).unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
 }
