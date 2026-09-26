@@ -105,6 +105,9 @@ LF. A double-quote prefix selects a named or numbered register, and dot
 replay retains that selection. Ex yank/put accept an optional register
 argument. System clipboard is not implemented; ex edits and r/R do not
 update the unnamed register yet.
+@a executes the contents of a named or numbered register as normal-mode
+keys; @@ repeats the previous macro. Macro expansion is bounded and there
+is no recording command or session persistence.
 w/b/e move to the next word start, previous word start, or word end;
 counts such as 3w repeat the motion. Words group Unicode letters/numbers
 and underscore separately from punctuation; Unicode whitespace separates

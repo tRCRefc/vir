@@ -9,6 +9,7 @@ pub(super) struct NormalPrefix {
     register: Option<char>,
     register_pending: bool,
     selected_register: Option<char>,
+    macro_pending: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub(super) enum PrefixAction {
     Repeat(Option<usize>),
     Operate(Operator, Option<Motion>, Option<usize>),
     Put(bool, usize),
+    Macro(char),
 }
 
 impl NormalPrefix {
@@ -30,6 +32,7 @@ impl NormalPrefix {
             || self.operator.is_some()
             || self.register_pending
             || self.register.is_some()
+            || self.macro_pending
     }
 
     pub(super) fn take_register(&mut self) -> Option<char> {
@@ -63,6 +66,24 @@ impl NormalPrefix {
             self.register = Some(name);
             return Ok(PrefixAction::Pending);
         }
+        if self.macro_pending {
+            if key.code == KeyCode::Esc
+                || key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                *self = Self::default();
+                return Ok(PrefixAction::Pending);
+            }
+            let KeyCode::Char(name @ ('a'..='z' | 'A'..='Z' | '1'..='9' | '@')) = key.code else {
+                *self = Self::default();
+                return Err("invalid macro register");
+            };
+            self.macro_pending = false;
+            self.complete();
+            self.selected_register = None;
+            return Ok(PrefixAction::Macro(name));
+        }
         if self.digits != 0
             && self.operator.is_none()
             && !matches!(key.code, KeyCode::Char('0'..='9'))
@@ -90,6 +111,10 @@ impl NormalPrefix {
         }
         if key.code == KeyCode::Char('"') {
             self.register_pending = true;
+            return Ok(PrefixAction::Pending);
+        }
+        if key.code == KeyCode::Char('@') {
+            self.macro_pending = true;
             return Ok(PrefixAction::Pending);
         }
         if let Some(result) = self.operator_key(key) {
@@ -551,5 +576,17 @@ mod tests {
         assert!(prefix.key(key('0')).is_err());
         assert!(!prefix.is_pending());
         assert_eq!(prefix.key(key('p')), Ok(PrefixAction::Put(false, 1)));
+    }
+
+    #[test]
+    fn macro_prefix_accepts_named_numbered_and_previous_registers() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
+        assert_eq!(prefix.key(key('a')), Ok(PrefixAction::Macro('a')));
+        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
+        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Macro('@')));
+        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
+        assert_eq!(prefix.key(key('1')), Ok(PrefixAction::Macro('1')));
     }
 }

@@ -57,18 +57,32 @@ struct CommandLine {
 struct NormalInput {
     prefix: NormalPrefix,
     replacement: Option<ReplaceKeys>,
+    last_macro: Option<char>,
 }
 
 impl NormalInput {
     /// A paste cancels an unfinished command instead of supplying its argument.
     fn cancel(&mut self) -> bool {
         let pending = self.replacement.is_some() || self.prefix.is_pending();
-        *self = Self::default();
+        let last_macro = self.last_macro;
+        *self = Self {
+            last_macro,
+            ..Self::default()
+        };
         pending
     }
 
     fn take_register(&mut self) -> Option<char> {
         self.prefix.take_register()
+    }
+
+    fn macro_register(&mut self, name: char) -> Option<char> {
+        if name == '@' {
+            self.last_macro
+        } else {
+            self.last_macro = Some(name);
+            Some(name)
+        }
     }
 
     fn key(
@@ -374,6 +388,18 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
     recovery.finish()
 }
 
+fn macro_text(editor: &Editor, name: char) -> Option<String> {
+    let register = match name {
+        'a'..='z' | 'A'..='Z' => editor.named_register(name),
+        '1'..='9' => editor.numbered_register((name as u8 - b'0') as usize),
+        _ => None,
+    }?;
+    Some(match register {
+        crate::editor::Register::Characters(text) => text.clone(),
+        crate::editor::Register::Lines(lines) => lines.join("\n"),
+    })
+}
+
 fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
@@ -384,6 +410,8 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
     let mut normal = NormalInput::default();
+    let mut macro_events = Vec::new();
+    let mut macro_expansions = 0usize;
     let (mut width, mut height) = terminal::size()?;
     loop {
         if let Err(error) = recovery.observe(editor) {
@@ -408,7 +436,10 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
         drop(output);
         // Some terminal environments do not deliver resize events reliably.
         // Check dimensions while idle as well, including during command input.
-        let event = read_event(width, height)?;
+        let event = macro_events
+            .pop()
+            .map(Ok)
+            .unwrap_or_else(|| read_event(width, height))?;
         match event {
             Event::Resize(w, h) => {
                 width = w;
@@ -462,6 +493,32 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     Ok(PrefixAction::Repeat(count)) => {
                         if let Err(error) = state.repeat_change(editor, count) {
                             command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
+                    Ok(PrefixAction::Macro(name)) => {
+                        let Some(name) = normal.macro_register(name) else {
+                            command.message = Some("? no previous macro".into());
+                            continue;
+                        };
+                        macro_expansions = macro_expansions.saturating_add(1);
+                        if macro_expansions > 100 {
+                            command.message = Some("? macro expansion limit".into());
+                            macro_events.clear();
+                            macro_expansions = 0;
+                            continue;
+                        }
+                        let Some(register) = macro_text(editor, name) else {
+                            command.message = Some("? macro register is empty".into());
+                            continue;
+                        };
+                        for character in register.chars().rev() {
+                            let code = if character == '\n' {
+                                KeyCode::Enter
+                            } else {
+                                KeyCode::Char(character)
+                            };
+                            macro_events.push(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
                         }
                         continue;
                     }
