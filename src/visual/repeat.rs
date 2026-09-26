@@ -13,6 +13,11 @@ pub enum InputStart {
         motion: Option<Motion>,
         count: Option<usize>,
     },
+    ChangeNamed {
+        motion: Option<Motion>,
+        count: Option<usize>,
+        register: char,
+    },
 }
 
 impl InputStart {
@@ -27,7 +32,10 @@ impl InputStart {
     }
 
     fn is_change(&self) -> bool {
-        matches!(self, Self::Change { .. } | Self::Insert('C'))
+        matches!(
+            self,
+            Self::Change { .. } | Self::ChangeNamed { .. } | Self::Insert('C')
+        )
     }
 
     fn supports_single_line_input(&self) -> bool {
@@ -83,6 +91,11 @@ impl InputStart {
         match *self {
             Self::Insert(mode) => state.begin_insert(editor, mode),
             Self::Change { motion, count } => state.begin_change(editor, motion, count),
+            Self::ChangeNamed {
+                motion,
+                count,
+                register,
+            } => state.begin_change_register(editor, motion, count, Some(register)),
         }
     }
 }
@@ -93,6 +106,11 @@ pub(super) enum ChangeRecord {
         motion: Option<Motion>,
         count: Option<usize>,
     },
+    DeleteNamed {
+        motion: Option<Motion>,
+        count: Option<usize>,
+        register: char,
+    },
     Join(usize),
     Replace {
         character: char,
@@ -101,6 +119,11 @@ pub(super) enum ChangeRecord {
     Put {
         before: bool,
         count: usize,
+    },
+    PutNamed {
+        before: bool,
+        count: usize,
+        register: char,
     },
     Input {
         start: InputStart,
@@ -113,13 +136,17 @@ impl ChangeRecord {
     fn override_count(&mut self, count: usize) {
         let count = count.max(1);
         match self {
-            Self::Delete { count: stored, .. } => *stored = Some(count),
-            Self::Join(stored) => *stored = count.max(2),
-            Self::Replace { count: stored, .. } | Self::Put { count: stored, .. } => {
-                *stored = count
+            Self::Delete { count: stored, .. } | Self::DeleteNamed { count: stored, .. } => {
+                *stored = Some(count)
             }
+            Self::Join(stored) => *stored = count.max(2),
+            Self::Replace { count: stored, .. }
+            | Self::Put { count: stored, .. }
+            | Self::PutNamed { count: stored, .. } => *stored = count,
             Self::Input {
-                start: InputStart::Change { count: stored, .. },
+                start:
+                    InputStart::Change { count: stored, .. }
+                    | InputStart::ChangeNamed { count: stored, .. },
                 ..
             } => *stored = Some(count),
             Self::Input {
@@ -134,13 +161,28 @@ impl ChangeRecord {
                 motion: Some(motion),
                 count,
             } => state.delete_motion(editor, *motion, *count),
+            Self::DeleteNamed {
+                motion: Some(motion),
+                count,
+                register,
+            } => state.delete_motion_register(editor, *motion, *count, Some(*register)),
             Self::Delete {
                 motion: None,
                 count,
             } => state.delete_lines(editor, count.unwrap_or(1)),
+            Self::DeleteNamed {
+                motion: None,
+                count,
+                register,
+            } => state.delete_lines_register(editor, count.unwrap_or(1), Some(*register)),
             Self::Join(count) => state.join_lines(editor, *count),
             Self::Replace { character, count } => state.replace_counted(editor, *character, *count),
             Self::Put { before, count } => state.put(editor, *before, *count),
+            Self::PutNamed {
+                before,
+                count,
+                register,
+            } => state.put_selected(editor, *before, *count, Some(*register)),
             Self::Input {
                 start,
                 actions,

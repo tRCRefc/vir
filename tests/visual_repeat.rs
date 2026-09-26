@@ -12,6 +12,13 @@ fn input(state: &mut VisualState, editor: &mut Editor, start: InputStart, action
     let mut edit = match start {
         InputStart::Insert(mode) => state.begin_insert(editor, mode).unwrap(),
         InputStart::Change { motion, count } => state.begin_change(editor, motion, count).unwrap(),
+        InputStart::ChangeNamed {
+            motion,
+            count,
+            register,
+        } => state
+            .begin_change_register(editor, motion, count, Some(register))
+            .unwrap(),
     };
     for action in actions {
         edit.apply_input(action).unwrap();

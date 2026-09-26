@@ -206,3 +206,19 @@ fn named_registers_select_yank_append_delete_and_put() {
         .unwrap();
     assert_eq!(editor.buffer().to_text(), "one\ntwo\none\ntwo\n");
 }
+
+#[test]
+fn dot_replay_keeps_named_delete_selection() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
+    let mut state = VisualState::default();
+    state
+        .delete_lines_register(&mut editor, 1, Some('a'))
+        .unwrap();
+    state.row = 0;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Lines(vec!["two".into()]))
+    );
+    assert_eq!(editor.buffer().to_text(), "three\n");
+}

@@ -123,9 +123,16 @@ impl VisualState {
         self.preferred_column = 0;
         self.left = 0;
         self.top = self.top.min(self.row);
-        self.last_change = Some(ChangeRecord::Delete {
-            motion: None,
-            count: Some(count.max(1)),
+        self.last_change = Some(match selected {
+            Some(register) => ChangeRecord::DeleteNamed {
+                motion: None,
+                count: Some(count.max(1)),
+                register,
+            },
+            None => ChangeRecord::Delete {
+                motion: None,
+                count: Some(count.max(1)),
+            },
         });
         Ok(())
     }
@@ -269,9 +276,16 @@ impl VisualState {
         self.preferred_column = self.column;
         self.top = self.top.min(self.row);
         self.left = 0;
-        self.last_change = Some(ChangeRecord::Delete {
-            motion: Some(motion),
-            count,
+        self.last_change = Some(match selected {
+            Some(register) => ChangeRecord::DeleteNamed {
+                motion: Some(motion),
+                count,
+                register,
+            },
+            None => ChangeRecord::Delete {
+                motion: Some(motion),
+                count,
+            },
         });
         Ok(())
     }
@@ -306,7 +320,15 @@ impl VisualState {
                 .ok_or("register is empty")?
                 .clone(),
         };
-        self.put_register(editor, before, count, &register)
+        self.put_register(editor, before, count, &register)?;
+        if let Some(register) = selected {
+            self.last_change = Some(ChangeRecord::PutNamed {
+                before,
+                count,
+                register,
+            });
+        }
+        Ok(())
     }
 
     pub fn put_numbered(

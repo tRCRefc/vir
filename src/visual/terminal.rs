@@ -486,8 +486,19 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         match state.begin_change_register(editor, motion, count, selected_register)
                         {
                             Ok(edit) => input_session(
-                                InputSession::new(edit, InputStart::Change { motion, count }, 1)
-                                    .map_err(io::Error::other)?,
+                                InputSession::new(
+                                    edit,
+                                    match selected_register {
+                                        Some(register) => InputStart::ChangeNamed {
+                                            motion,
+                                            count,
+                                            register,
+                                        },
+                                        None => InputStart::Change { motion, count },
+                                    },
+                                    1,
+                                )
+                                .map_err(io::Error::other)?,
                                 &mut state,
                                 &name,
                                 &mut width,

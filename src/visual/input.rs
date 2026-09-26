@@ -126,6 +126,7 @@ impl<'a> InputSession<'a> {
         match self.start {
             InputStart::Insert(mode) => mode,
             InputStart::Change { .. } => 'c',
+            InputStart::ChangeNamed { .. } => 'c',
         }
     }
 
