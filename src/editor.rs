@@ -5,6 +5,7 @@ mod register;
 mod text_edit;
 mod undo_location;
 pub use register::Register;
+use register::RegisterBank;
 use std::path::{Path, PathBuf};
 pub use text_edit::{InputAction, TextEdit};
 pub(crate) use undo_location::UndoLocation;
@@ -17,6 +18,7 @@ use crate::file_io;
 pub struct Editor {
     buffer: TextBuffer,
     pub(crate) unnamed: Option<Register>,
+    pub(crate) registers: RegisterBank,
     current: Option<usize>,
     path: Option<PathBuf>,
     modified: bool,
@@ -50,6 +52,27 @@ impl Editor {
 
     pub fn unnamed_register(&self) -> Option<&Register> {
         self.unnamed.as_ref()
+    }
+
+    pub fn named_register(&self, name: char) -> Option<&Register> {
+        self.registers.named(name)
+    }
+
+    pub fn set_named_register(
+        &mut self,
+        name: char,
+        register: Register,
+        append: bool,
+    ) -> Result<(), String> {
+        self.registers.set_named(name, register, append)
+    }
+
+    pub(crate) fn push_numbered_register(&mut self, register: Register) {
+        self.registers.push_numbered(register);
+    }
+
+    pub fn numbered_register(&self, number: usize) -> Option<&Register> {
+        self.registers.numbered(number)
     }
 
     pub fn buffer(&self) -> &TextBuffer {
@@ -197,6 +220,7 @@ impl Editor {
         loaded.warned_remaining = self.warned_remaining;
         loaded.last_search = self.last_search.clone();
         loaded.unnamed = self.unnamed.clone();
+        loaded.registers = self.registers.clone();
         *self = loaded;
         Ok(())
     }

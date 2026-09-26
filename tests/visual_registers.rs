@@ -150,3 +150,34 @@ fn register_survives_file_switch_and_can_be_pasted() {
     state.put(&mut editor, false, 1).unwrap();
     assert_eq!(editor.buffer().to_text(), "other\ncopy\n");
 }
+
+#[test]
+fn line_deletes_shift_numbered_registers() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
+    let mut state = VisualState::default();
+    state.delete_lines(&mut editor, 1).unwrap();
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+    state.delete_lines(&mut editor, 1).unwrap();
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Lines(vec!["two".into()]))
+    );
+    assert_eq!(
+        editor.numbered_register(2),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+}
+
+#[test]
+fn numbered_register_can_be_pasted_without_changing_unnamed() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("target\nsource\n").unwrap());
+    let mut state = VisualState::default();
+    state.delete_lines(&mut editor, 1).unwrap();
+    editor.set_current(0).unwrap();
+    state.row = 0;
+    state.put_numbered(&mut editor, false, 1, 1).unwrap();
+    assert_eq!(editor.buffer().to_text(), "source\ntarget\n");
+}

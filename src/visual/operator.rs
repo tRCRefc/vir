@@ -104,6 +104,7 @@ impl VisualState {
         let (start, end) = self.counted_lines(editor.buffer(), count)?;
         let register = Register::lines(editor.buffer(), start, end)?;
         editor.delete_lines(self.row, end)?;
+        editor.push_numbered_register(register.clone());
         editor.set_line_undo(self.row, self.row.saturating_sub(1));
         editor.unnamed = Some(register);
         self.row = editor.current().unwrap_or(0);
@@ -240,6 +241,7 @@ impl VisualState {
                 );
             }
         }
+        editor.push_numbered_register(register.clone());
         editor.unnamed = Some(register);
         self.preferred_column = self.column;
         self.top = self.top.min(self.row);
@@ -256,6 +258,30 @@ impl VisualState {
             .unnamed_register()
             .ok_or("register is empty")?
             .clone();
+        self.put_register(editor, before, count, &register)
+    }
+
+    pub fn put_numbered(
+        &mut self,
+        editor: &mut Editor,
+        before: bool,
+        count: usize,
+        number: usize,
+    ) -> Result<(), String> {
+        let register = editor
+            .numbered_register(number)
+            .ok_or("register is empty")?
+            .clone();
+        self.put_register(editor, before, count, &register)
+    }
+
+    fn put_register(
+        &mut self,
+        editor: &mut Editor,
+        before: bool,
+        count: usize,
+        register: &Register,
+    ) -> Result<(), String> {
         let position = Position {
             row: self.row,
             column: self.column,
