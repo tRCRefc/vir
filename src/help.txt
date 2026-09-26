@@ -15,6 +15,8 @@ when stdin and stdout are terminals; piped sessions have no prompt.
   [range]p / nu         Print lines / print with line numbers
   [address]a / i       Append after / insert before the addressed line
   [range]c / d         Change / delete lines
+  [range]y [reg]       Yank lines to unnamed or named register
+  [address]put [reg]   Put unnamed, named, or numbered register lines
   u                    Toggle the most recent edit (save preserves undo)
   [range]w [path]       Write all lines or export a range
   [range]wq [path]      Write, then check whether quitting is allowed
@@ -97,8 +99,10 @@ current line (whole lines); 3p repeats the contents in one undo.
 Normal d/dd/D/x and c/cc/C also fill this register; changes publish it
 when the input session commits. Undo, put and file switches preserve it.
 Line puts use LF-terminated lines, even if the original file lacked final
-LF. Named/numbered registers, system clipboard and ex yank/put are not
-implemented; ex edits and r/R do not update the unnamed register yet.
+LF. A double-quote prefix selects a named or numbered register, and dot
+replay retains that selection. Ex yank/put accept an optional register
+argument. System clipboard is not implemented; ex edits and r/R do not
+update the unnamed register yet.
 w/b/e move to the next word start, previous word start, or word end;
 counts such as 3w repeat the motion. Words group Unicode letters/numbers
 and underscore separately from punctuation; Unicode whitespace separates

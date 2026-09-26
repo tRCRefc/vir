@@ -76,38 +76,6 @@ fn append_register(previous: Option<Register>, next: Register) -> Result<Registe
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn named_registers_overwrite_and_append() {
-        let mut bank = RegisterBank::default();
-        bank.set_named('a', Register::Characters("one".into()), false)
-            .unwrap();
-        bank.set_named('A', Register::Characters(" two".into()), true)
-            .unwrap();
-        assert_eq!(
-            bank.named('a'),
-            Some(&Register::Characters("one two".into()))
-        );
-        bank.set_named('a', Register::Lines(vec!["line".into()]), false)
-            .unwrap();
-        assert_eq!(bank.named('a'), Some(&Register::Lines(vec!["line".into()])));
-    }
-
-    #[test]
-    fn numbered_registers_shift_newest_to_one() {
-        let mut bank = RegisterBank::default();
-        for text in ["one", "two"] {
-            bank.push_numbered(Register::Characters(text.into()));
-        }
-        assert_eq!(bank.numbered(1), Some(&Register::Characters("two".into())));
-        assert_eq!(bank.numbered(2), Some(&Register::Characters("one".into())));
-        assert_eq!(bank.numbered(0), None);
-    }
-}
-
 impl Register {
     pub(crate) fn characters(
         buffer: &TextBuffer,
@@ -145,5 +113,37 @@ impl Register {
                 .map(|row| buffer.line(row).unwrap().to_owned())
                 .collect(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_registers_overwrite_and_append() {
+        let mut bank = RegisterBank::default();
+        bank.set_named('a', Register::Characters("one".into()), false)
+            .unwrap();
+        bank.set_named('A', Register::Characters(" two".into()), true)
+            .unwrap();
+        assert_eq!(
+            bank.named('a'),
+            Some(&Register::Characters("one two".into()))
+        );
+        bank.set_named('a', Register::Lines(vec!["line".into()]), false)
+            .unwrap();
+        assert_eq!(bank.named('a'), Some(&Register::Lines(vec!["line".into()])));
+    }
+
+    #[test]
+    fn numbered_registers_shift_newest_to_one() {
+        let mut bank = RegisterBank::default();
+        for text in ["one", "two"] {
+            bank.push_numbered(Register::Characters(text.into()));
+        }
+        assert_eq!(bank.numbered(1), Some(&Register::Characters("two".into())));
+        assert_eq!(bank.numbered(2), Some(&Register::Characters("one".into())));
+        assert_eq!(bank.numbered(0), None);
     }
 }

@@ -372,7 +372,7 @@ impl VisualState {
                     .try_reserve_exact(capacity)
                     .map_err(|_| "paste too large")?;
                 for _ in 0..count {
-                    repeated.push_str(&text);
+                    repeated.push_str(text);
                 }
                 let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
                 let column = if before {
@@ -560,16 +560,16 @@ fn validate_register_target(
     register: &Register,
 ) -> Result<(), String> {
     validate_write_register(selected)?;
-    if let Some(name @ 'A'..='Z') = selected {
-        if let Some(existing) = editor.named_register(name) {
-            let compatible = matches!(
-                (existing, register),
-                (Register::Characters(_), Register::Characters(_))
-                    | (Register::Lines(_), Register::Lines(_))
-            );
-            if !compatible {
-                return Err("cannot append registers of different kinds".into());
-            }
+    if let Some(name @ 'A'..='Z') = selected
+        && let Some(existing) = editor.named_register(name)
+    {
+        let compatible = matches!(
+            (existing, register),
+            (Register::Characters(_), Register::Characters(_))
+                | (Register::Lines(_), Register::Lines(_))
+        );
+        if !compatible {
+            return Err("cannot append registers of different kinds".into());
         }
     }
     Ok(())
