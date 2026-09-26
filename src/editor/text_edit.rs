@@ -24,6 +24,7 @@ pub struct TextEdit<'a> {
     replaced_lines: Option<(usize, usize)>,
     initial_undo_column: Option<usize>,
     pending_register: Option<super::Register>,
+    pending_named_register: Option<(char, super::Register, bool)>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
 }
@@ -45,6 +46,7 @@ impl Editor {
             initial_undo_column: None,
             replacements: Vec::new(),
             pending_register: None,
+            pending_named_register: None,
             input_actions: None,
         })
     }
@@ -203,6 +205,15 @@ impl TextEdit<'_> {
 
     pub(crate) fn stage_register(&mut self, register: super::Register) {
         self.pending_register = Some(register);
+    }
+
+    pub(crate) fn stage_named_register(
+        &mut self,
+        name: char,
+        register: super::Register,
+        append: bool,
+    ) {
+        self.pending_named_register = Some((name, register, append));
     }
 
     /// The original line range replaced by a command, before any draft changes.
@@ -489,6 +500,9 @@ impl TextEdit<'_> {
         }
         if let Some(register) = self.pending_register {
             self.editor.unnamed = Some(register);
+        }
+        if let Some((name, register, append)) = self.pending_named_register {
+            self.editor.set_named_register(name, register, append)?;
         }
         Ok(self.cursor)
     }

@@ -181,3 +181,28 @@ fn numbered_register_can_be_pasted_without_changing_unnamed() {
     state.put_numbered(&mut editor, false, 1, 1).unwrap();
     assert_eq!(editor.buffer().to_text(), "source\ntarget\n");
 }
+
+#[test]
+fn named_registers_select_yank_append_delete_and_put() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut state = VisualState::default();
+    state
+        .yank_register(&mut editor, None, Some(1), Some('a'))
+        .unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+    state.row = 1;
+    state
+        .yank_register(&mut editor, None, Some(1), Some('A'))
+        .unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Lines(vec!["one".into(), "two".into()]))
+    );
+    state
+        .put_selected(&mut editor, false, 1, Some('a'))
+        .unwrap();
+    assert_eq!(editor.buffer().to_text(), "one\ntwo\none\ntwo\n");
+}

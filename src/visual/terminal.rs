@@ -67,6 +67,10 @@ impl NormalInput {
         pending
     }
 
+    fn take_register(&mut self) -> Option<char> {
+        self.prefix.take_register()
+    }
+
     fn key(
         &mut self,
         key: KeyEvent,
@@ -433,7 +437,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     continue;
                 }
                 command.message = None;
-                match normal.key(key, editor, &mut state, &mut command) {
+                let action = normal.key(key, editor, &mut state, &mut command);
+                let selected_register = normal.take_register();
+                match action {
                     Ok(PrefixAction::Pending) => continue,
                     Ok(PrefixAction::Insert(mode, count)) => {
                         insert_mode(
@@ -460,20 +466,25 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Yank, motion, count)) => {
-                        if let Err(error) = state.yank(editor, motion, count) {
+                        if let Err(error) =
+                            state.yank_register(editor, motion, count, selected_register)
+                        {
                             command.message = Some(format!("? {error}"));
                         }
                         continue;
                     }
                     Ok(PrefixAction::Put(before, count)) => {
-                        if let Err(error) = state.put(editor, before, count) {
+                        if let Err(error) =
+                            state.put_selected(editor, before, count, selected_register)
+                        {
                             command.message = Some(format!("? {error}"));
                         }
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Change, motion, count)) => {
                         let name = editor_title(editor);
-                        match state.begin_change(editor, motion, count) {
+                        match state.begin_change_register(editor, motion, count, selected_register)
+                        {
                             Ok(edit) => input_session(
                                 InputSession::new(edit, InputStart::Change { motion, count }, 1)
                                     .map_err(io::Error::other)?,
@@ -488,7 +499,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Delete, Some(motion), count)) => {
-                        if let Err(error) = state.delete_motion(editor, motion, count) {
+                        if let Err(error) =
+                            state.delete_motion_register(editor, motion, count, selected_register)
+                        {
                             command.message = Some(format!("? {error}"));
                         }
                         continue;
@@ -504,7 +517,11 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Delete, None, count)) => {
-                        if let Err(error) = state.delete_lines(editor, count.unwrap_or(1)) {
+                        if let Err(error) = state.delete_lines_register(
+                            editor,
+                            count.unwrap_or(1),
+                            selected_register,
+                        ) {
                             command.message = Some(format!("? {error}"));
                         }
                         continue;

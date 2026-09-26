@@ -101,12 +101,23 @@ impl EditRange {
 
 impl VisualState {
     pub fn delete_lines(&mut self, editor: &mut Editor, count: usize) -> Result<(), String> {
+        self.delete_lines_register(editor, count, None)
+    }
+
+    pub fn delete_lines_register(
+        &mut self,
+        editor: &mut Editor,
+        count: usize,
+        selected: Option<char>,
+    ) -> Result<(), String> {
+        validate_write_register(selected)?;
         let (start, end) = self.counted_lines(editor.buffer(), count)?;
         let register = Register::lines(editor.buffer(), start, end)?;
+        validate_register_target(editor, selected, &register)?;
         editor.delete_lines(self.row, end)?;
         editor.push_numbered_register(register.clone());
         editor.set_line_undo(self.row, self.row.saturating_sub(1));
-        editor.unnamed = Some(register);
+        self.publish_register(editor, selected, register)?;
         self.row = editor.current().unwrap_or(0);
         self.column = 0;
         self.preferred_column = 0;
@@ -215,8 +226,20 @@ impl VisualState {
         motion: Motion,
         count: Option<usize>,
     ) -> Result<(), String> {
+        self.delete_motion_register(editor, motion, count, None)
+    }
+
+    pub fn delete_motion_register(
+        &mut self,
+        editor: &mut Editor,
+        motion: Motion,
+        count: Option<usize>,
+        selected: Option<char>,
+    ) -> Result<(), String> {
+        validate_write_register(selected)?;
         let range = self.motion_range(editor, motion, count, Operator::Delete)?;
         let register = range.capture(editor)?;
+        validate_register_target(editor, selected, &register)?;
         match range {
             EditRange::Lines(start, end) => {
                 editor.delete_lines(start, end)?;
@@ -242,7 +265,7 @@ impl VisualState {
             }
         }
         editor.push_numbered_register(register.clone());
-        editor.unnamed = Some(register);
+        self.publish_register(editor, selected, register)?;
         self.preferred_column = self.column;
         self.top = self.top.min(self.row);
         self.left = 0;
@@ -258,6 +281,31 @@ impl VisualState {
             .unnamed_register()
             .ok_or("register is empty")?
             .clone();
+        self.put_register(editor, before, count, &register)
+    }
+
+    pub fn put_selected(
+        &mut self,
+        editor: &mut Editor,
+        before: bool,
+        count: usize,
+        selected: Option<char>,
+    ) -> Result<(), String> {
+        let register = match selected {
+            Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => editor
+                .named_register(name)
+                .ok_or("register is empty")?
+                .clone(),
+            Some(name @ '1'..='9') => editor
+                .numbered_register((name as u8 - b'0') as usize)
+                .ok_or("register is empty")?
+                .clone(),
+            Some(_) => return Err("invalid register".into()),
+            None => editor
+                .unnamed_register()
+                .ok_or("register is empty")?
+                .clone(),
+        };
         self.put_register(editor, before, count, &register)
     }
 
@@ -361,13 +409,40 @@ impl VisualState {
         motion: Option<Motion>,
         count: Option<usize>,
     ) -> Result<(), String> {
+        self.yank_register(editor, motion, count, None)
+    }
+
+    pub fn yank_register(
+        &self,
+        editor: &mut Editor,
+        motion: Option<Motion>,
+        count: Option<usize>,
+        selected: Option<char>,
+    ) -> Result<(), String> {
         let range = if let Some(motion) = motion {
             self.motion_range(editor, motion, count, Operator::Yank)?
         } else {
             let (start, end) = self.counted_lines(editor.buffer(), count.unwrap_or(1))?;
             EditRange::Lines(start, end)
         };
-        editor.unnamed = Some(range.capture(editor)?);
+        let register = range.capture(editor)?;
+        validate_register_target(editor, selected, &register)?;
+        self.publish_register(editor, selected, register)
+    }
+
+    fn publish_register(
+        &self,
+        editor: &mut Editor,
+        selected: Option<char>,
+        register: Register,
+    ) -> Result<(), String> {
+        match selected {
+            None => editor.unnamed = Some(register),
+            Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => {
+                editor.set_named_register(name, register, name.is_ascii_uppercase())?
+            }
+            Some(_) => return Err("invalid register".into()),
+        }
         Ok(())
     }
 
@@ -378,8 +453,18 @@ impl VisualState {
         motion: Option<Motion>,
         count: Option<usize>,
     ) -> Result<TextEdit<'a>, String> {
+        self.begin_change_register(editor, motion, count, None)
+    }
+
+    pub fn begin_change_register<'a>(
+        &self,
+        editor: &'a mut Editor,
+        motion: Option<Motion>,
+        count: Option<usize>,
+        selected: Option<char>,
+    ) -> Result<TextEdit<'a>, String> {
         if matches!(motion, Some(Motion::End)) && count.unwrap_or(1) <= 1 {
-            return self.begin_insert(editor, 'C');
+            return self.begin_insert_register(editor, 'C', selected);
         }
         let range = if let Some(motion) = motion {
             self.motion_range(editor, motion, count, Operator::Change)?
@@ -400,6 +485,7 @@ impl VisualState {
             EditRange::Lines(start, end)
         };
         let register = range.capture(editor)?;
+        validate_register_target(editor, selected, &register)?;
         let replaced_lines = match range {
             EditRange::Lines(start, end) => Some((start, end)),
             EditRange::Characters(..) => None,
@@ -426,8 +512,43 @@ impl VisualState {
             edit.record_character_replacement(start, end);
         }
         edit.delete_range(start, end)?;
-        edit.stage_register(register);
+        match selected {
+            None => edit.stage_register(register),
+            Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => {
+                edit.stage_named_register(name, register, name.is_ascii_uppercase())
+            }
+            Some(_) => return Err("invalid register".into()),
+        }
         edit.record_input();
         Ok(edit)
     }
+}
+
+fn validate_write_register(selected: Option<char>) -> Result<(), String> {
+    if matches!(selected, Some(name) if !name.is_ascii_alphabetic()) {
+        Err("invalid register".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_register_target(
+    editor: &Editor,
+    selected: Option<char>,
+    register: &Register,
+) -> Result<(), String> {
+    validate_write_register(selected)?;
+    if let Some(name @ 'A'..='Z') = selected {
+        if let Some(existing) = editor.named_register(name) {
+            let compatible = matches!(
+                (existing, register),
+                (Register::Characters(_), Register::Characters(_))
+                    | (Register::Lines(_), Register::Lines(_))
+            );
+            if !compatible {
+                return Err("cannot append registers of different kinds".into());
+            }
+        }
+    }
+    Ok(())
 }

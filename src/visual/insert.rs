@@ -23,8 +23,20 @@ impl VisualState {
         editor: &'a mut Editor,
         mode: char,
     ) -> Result<TextEdit<'a>, String> {
+        self.begin_insert_register(editor, mode, None)
+    }
+
+    pub fn begin_insert_register<'a>(
+        &self,
+        editor: &'a mut Editor,
+        mode: char,
+        selected: Option<char>,
+    ) -> Result<TextEdit<'a>, String> {
         if !matches!(mode, 'i' | 'a' | 'o' | 'I' | 'A' | 'O' | 'C' | 'R') {
             return Err("unsupported insert mode".into());
+        }
+        if matches!(selected, Some(name) if !name.is_ascii_alphabetic()) {
+            return Err("invalid register".into());
         }
         let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
         let column = if mode == 'a' || mode == 'A' {
@@ -59,6 +71,18 @@ impl VisualState {
         } else {
             None
         };
+        if let (Some(name @ 'A'..='Z'), Some(register)) = (selected, register.as_ref()) {
+            if let Some(existing) = editor.named_register(name) {
+                let compatible = matches!(
+                    (existing, register),
+                    (Register::Characters(_), Register::Characters(_))
+                        | (Register::Lines(_), Register::Lines(_))
+                );
+                if !compatible {
+                    return Err("cannot append registers of different kinds".into());
+                }
+            }
+        }
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column,
@@ -66,7 +90,13 @@ impl VisualState {
         if mode == 'C' {
             edit.delete_to_line_end()?;
             if let Some(register) = register {
-                edit.stage_register(register);
+                match selected {
+                    None => edit.stage_register(register),
+                    Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => {
+                        edit.stage_named_register(name, register, name.is_ascii_uppercase())
+                    }
+                    Some(_) => return Err("invalid register".into()),
+                }
             }
         }
         if mode == 'o' {

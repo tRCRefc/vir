@@ -6,6 +6,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub(super) struct NormalPrefix {
     digits: usize,
     operator: Option<(Operator, usize)>,
+    register: Option<char>,
+    register_pending: bool,
+    selected_register: Option<char>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,18 +26,50 @@ pub(super) enum PrefixAction {
 
 impl NormalPrefix {
     pub(super) fn is_pending(&self) -> bool {
-        self.digits != 0 || self.operator.is_some()
+        self.digits != 0
+            || self.operator.is_some()
+            || self.register_pending
+            || self.register.is_some()
+    }
+
+    pub(super) fn take_register(&mut self) -> Option<char> {
+        self.selected_register.take()
+    }
+
+    fn complete(&mut self) {
+        let selected = self.register.take();
+        *self = Self {
+            selected_register: selected,
+            ..Self::default()
+        };
     }
 
     pub(super) fn key(&mut self, key: KeyEvent) -> Result<PrefixAction, &'static str> {
-        let active = self.digits != 0 || self.operator.is_some();
+        let active = self.is_pending();
+        if self.register_pending {
+            if key.code == KeyCode::Esc
+                || key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                *self = Self::default();
+                return Ok(PrefixAction::Pending);
+            }
+            let KeyCode::Char(name @ ('a'..='z' | 'A'..='Z' | '1'..='9')) = key.code else {
+                *self = Self::default();
+                return Err("invalid register");
+            };
+            self.register_pending = false;
+            self.register = Some(name);
+            return Ok(PrefixAction::Pending);
+        }
         if self.digits != 0
             && self.operator.is_none()
             && !matches!(key.code, KeyCode::Char('0'..='9'))
             && let Some(motion) = normal_motion(key)
         {
             let count = self.digits;
-            *self = Self::default();
+            self.complete();
             return Ok(PrefixAction::Move(motion, count));
         }
 
@@ -52,6 +87,10 @@ impl NormalPrefix {
         }
         if let Some(result) = self.digit_key(key) {
             return result;
+        }
+        if key.code == KeyCode::Char('"') {
+            self.register_pending = true;
+            return Ok(PrefixAction::Pending);
         }
         if let Some(result) = self.operator_key(key) {
             return result;
@@ -92,7 +131,7 @@ impl NormalPrefix {
         let requested = Operator::from_key(c)?;
         if let Some((operator, before)) = self.operator {
             let count = before.max(1).checked_mul(self.digits.max(1));
-            *self = Self::default();
+            self.complete();
             return Some(if requested != operator {
                 Err("mixed operators; command cancelled")
             } else {
@@ -114,7 +153,7 @@ impl NormalPrefix {
     ) -> Result<PrefixAction, &'static str> {
         let count = before.max(1).checked_mul(self.digits.max(1));
         let explicit = before != 0 || self.digits != 0;
-        *self = Self::default();
+        self.complete();
         let count = count.ok_or("count too large")?;
         normal_motion(key)
             .filter(|motion| motion.supports_operator())
@@ -125,7 +164,7 @@ impl NormalPrefix {
     fn command_key(&mut self, key: KeyEvent, active: bool) -> Result<PrefixAction, &'static str> {
         let digits = self.digits;
         let count = digits.max(1);
-        *self = Self::default();
+        self.complete();
         match key.code {
             KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R')) => {
                 if InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
@@ -488,5 +527,29 @@ mod tests {
         prefix.key(key('2')).unwrap();
         assert!(prefix.key(key('d')).is_err());
         assert_eq!(prefix.key(key('q')), Ok(PrefixAction::Pass));
+    }
+
+    #[test]
+    fn register_prefix_survives_operator_and_cancels_cleanly() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        assert_eq!(prefix.key(key('"')), Ok(PrefixAction::Pending));
+        assert_eq!(prefix.key(key('a')), Ok(PrefixAction::Pending));
+        assert_eq!(prefix.key(key('d')), Ok(PrefixAction::Pending));
+        assert_eq!(
+            prefix.key(key('w')),
+            Ok(PrefixAction::Operate(
+                Operator::Delete,
+                Some(Motion::WordForward),
+                None
+            ))
+        );
+        assert_eq!(prefix.take_register(), Some('a'));
+        assert!(!prefix.is_pending());
+
+        assert_eq!(prefix.key(key('"')), Ok(PrefixAction::Pending));
+        assert!(prefix.key(key('0')).is_err());
+        assert!(!prefix.is_pending());
+        assert_eq!(prefix.key(key('p')), Ok(PrefixAction::Put(false, 1)));
     }
 }
