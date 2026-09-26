@@ -39,6 +39,7 @@ pub enum Command {
     Delete,
     Yank { register: Option<char> },
     Put { register: Option<char> },
+    SetAutoIndent(bool),
     Change,
     Append,
     Insert,
@@ -136,6 +137,30 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         }
     }
     let name = &s[start..i];
+    if name == "set" {
+        let option = s[i..].trim();
+        return match option {
+            "ai" | "autoindent" => Ok(ParsedCommand {
+                range: Range {
+                    start: first,
+                    end: second,
+                },
+                command: Command::SetAutoIndent(true),
+                path: None,
+                substitution: None,
+            }),
+            "noai" | "noautoindent" => Ok(ParsedCommand {
+                range: Range {
+                    start: first,
+                    end: second,
+                },
+                command: Command::SetAutoIndent(false),
+                path: None,
+                substitution: None,
+            }),
+            _ => Err(ParseError::UnexpectedArguments),
+        };
+    }
     if matches!(
         name,
         "s" | "su"

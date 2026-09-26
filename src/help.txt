@@ -26,6 +26,7 @@ when stdin and stdout are terminals; piped sessions have no prompt.
   n[!]                 Edit the next startup file
   q / q!               Quit with checks / discard changes and quit
   [range]s/pat/text/[g] Replace first match per line, or all matches with g
+  set ai / set noai   Enable / disable automatic indentation for newlines
 
 Addresses: line number, . (current), $ (last), % (all), /pattern/,
 ?pattern?, one +/- offset, or comma-separated endpoints. A bare address
@@ -91,7 +92,8 @@ enter Insert. cc changes the current line; 2cc or c2c changes two lines,
 and 2c3c changes six. Whole-line changes leave one input line. Deletion
 and all typed text form one undo; Esc/Ctrl-C commits even if no text was
 typed. A pending c is cancelled by Esc/Ctrl-C. cc and c$ can start input
-in an empty buffer. Automatic indentation is not supported.
+in an empty buffer. Automatic indentation is opt-in with set ai and copies
+the leading spaces or tabs of the current line for inserted newlines.
 yy copies lines; yh/yl/yj/yk/y0/y$/yG copy the same ranges as d. Counts
 multiply, e.g. 2y3y copies six lines. Copying preserves text and undo.
 p/P put the unnamed register after/before the cursor (characters) or

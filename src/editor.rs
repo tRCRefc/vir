@@ -30,6 +30,7 @@ pub struct Editor {
     undo: Option<(TextBuffer, Option<usize>)>,
     undo_location: Option<UndoLocation>,
     edit_generation: u64,
+    autoindent: bool,
 }
 
 impl Editor {
@@ -89,6 +90,14 @@ impl Editor {
 
     pub fn is_modified(&self) -> bool {
         self.modified
+    }
+
+    pub fn autoindent(&self) -> bool {
+        self.autoindent
+    }
+
+    pub fn set_autoindent(&mut self, enabled: bool) {
+        self.autoindent = enabled;
     }
 
     pub fn insert_lines<I, S>(&mut self, at: usize, lines: I) -> Result<(), String>
@@ -221,6 +230,7 @@ impl Editor {
         loaded.last_search = self.last_search.clone();
         loaded.unnamed = self.unnamed.clone();
         loaded.registers = self.registers.clone();
+        loaded.autoindent = self.autoindent;
         *self = loaded;
         Ok(())
     }

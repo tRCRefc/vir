@@ -25,6 +25,11 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
                 return Err("command does not accept addresses".into());
             }
         }
+        Command::SetAutoIndent(_) => {
+            if addressed {
+                return Err("command does not accept addresses".into());
+            }
+        }
         Command::Write | Command::WriteQuit => {
             if addressed {
                 evaluate(
@@ -202,6 +207,13 @@ fn execute_resolved(
             editor,
         );
     }
+    if let Command::SetAutoIndent(enabled) = parsed.command {
+        editor.set_autoindent(enabled);
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
     match parsed.command {
         Command::Quit { force } => {
             editor.check_quit(force)?;
@@ -239,7 +251,7 @@ fn execute_resolved(
         Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File => {
             unreachable!()
         }
-        Command::Undo => unreachable!(),
+        Command::Undo | Command::SetAutoIndent(_) => unreachable!(),
         Command::Print
         | Command::Number
         | Command::Delete

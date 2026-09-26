@@ -283,15 +283,39 @@ impl TextEdit<'_> {
     }
 
     pub fn insert(&mut self, text: &str) -> Result<(), String> {
+        let original = text.to_owned();
+        let text = self.autoindent_text(text);
         self.cursor = self
             .draft
-            .replace_text(self.cursor, self.cursor, text)
+            .replace_text(self.cursor, self.cursor, &text)
             .map_err(str::to_owned)?;
         self.crossed_lines |= text.contains('\n');
         if !text.is_empty() && self.input_actions.is_some() {
-            self.record(InputAction::Insert(text.to_owned()));
+            self.record(InputAction::Insert(original));
         }
         Ok(())
+    }
+
+    fn autoindent_text(&self, text: &str) -> String {
+        if !self.editor.autoindent || !text.contains('\n') {
+            return text.to_owned();
+        }
+        let indent: String = self
+            .draft
+            .line(self.cursor.row)
+            .unwrap_or("")
+            .chars()
+            .take_while(|c| matches!(c, ' ' | '\t'))
+            .collect();
+        let mut expanded = String::with_capacity(text.len() + indent.len());
+        for (index, part) in text.split('\n').enumerate() {
+            if index != 0 {
+                expanded.push('\n');
+                expanded.push_str(&indent);
+            }
+            expanded.push_str(part);
+        }
+        expanded
     }
 
     pub fn backspace(&mut self) -> Result<(), String> {
