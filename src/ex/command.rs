@@ -48,6 +48,8 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
         | Command::Print
         | Command::Number
         | Command::Delete
+        | Command::Yank
+        | Command::Put
         | Command::Change => {
             evaluate(
                 parsed.range.clone(),
@@ -241,6 +243,8 @@ fn execute_resolved(
         Command::Print
         | Command::Number
         | Command::Delete
+        | Command::Yank
+        | Command::Put
         | Command::Change
         | Command::Append
         | Command::Insert => {
@@ -267,6 +271,39 @@ fn execute_resolved(
                 editor
                     .delete_lines(range.start, range.end)
                     .map_err(|e| e.to_string())?;
+                return Ok(ResultValue {
+                    output: String::new(),
+                    quit: false,
+                });
+            }
+            if parsed.command == Command::Yank {
+                let register =
+                    crate::editor::Register::lines(editor.buffer(), range.start, range.end)?;
+                editor.unnamed = Some(register);
+                editor
+                    .set_current(range.end)
+                    .map_err(|e| format!("{e:?}"))?;
+                return Ok(ResultValue {
+                    output: String::new(),
+                    quit: false,
+                });
+            }
+            if parsed.command == Command::Put {
+                let register = editor
+                    .unnamed_register()
+                    .ok_or("register is empty")?
+                    .clone();
+                let lines = match register {
+                    crate::editor::Register::Lines(lines) => lines,
+                    crate::editor::Register::Characters(text) => {
+                        text.split('\n').map(str::to_owned).collect()
+                    }
+                };
+                let at = range
+                    .end
+                    .saturating_add(1)
+                    .min(editor.buffer().line_count());
+                editor.insert_lines(at, lines)?;
                 return Ok(ResultValue {
                     output: String::new(),
                     quit: false,
