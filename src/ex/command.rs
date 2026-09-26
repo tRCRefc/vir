@@ -48,8 +48,8 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
         | Command::Print
         | Command::Number
         | Command::Delete
-        | Command::Yank
-        | Command::Put
+        | Command::Yank { .. }
+        | Command::Put { .. }
         | Command::Change => {
             evaluate(
                 parsed.range.clone(),
@@ -243,8 +243,8 @@ fn execute_resolved(
         Command::Print
         | Command::Number
         | Command::Delete
-        | Command::Yank
-        | Command::Put
+        | Command::Yank { .. }
+        | Command::Put { .. }
         | Command::Change
         | Command::Append
         | Command::Insert => {
@@ -268,18 +268,30 @@ fn execute_resolved(
             let range = evaluate(parsed.range.clone(), buffer.line_count(), editor.current())
                 .map_err(|e| format!("{e:?}"))?;
             if parsed.command == Command::Delete {
+                let register =
+                    crate::editor::Register::lines(editor.buffer(), range.start, range.end)?;
                 editor
                     .delete_lines(range.start, range.end)
                     .map_err(|e| e.to_string())?;
+                editor.push_numbered_register(register);
                 return Ok(ResultValue {
                     output: String::new(),
                     quit: false,
                 });
             }
-            if parsed.command == Command::Yank {
+            if let Command::Yank { register: _ } = parsed.command {
                 let register =
                     crate::editor::Register::lines(editor.buffer(), range.start, range.end)?;
-                editor.unnamed = Some(register);
+                match parsed.command {
+                    Command::Yank { register: None } => editor.unnamed = Some(register),
+                    Command::Yank {
+                        register: Some(name @ 'a'..='z'),
+                    }
+                    | Command::Yank {
+                        register: Some(name @ 'A'..='Z'),
+                    } => editor.set_named_register(name, register, name.is_ascii_uppercase())?,
+                    _ => unreachable!(),
+                }
                 editor
                     .set_current(range.end)
                     .map_err(|e| format!("{e:?}"))?;
@@ -288,11 +300,22 @@ fn execute_resolved(
                     quit: false,
                 });
             }
-            if parsed.command == Command::Put {
-                let register = editor
-                    .unnamed_register()
-                    .ok_or("register is empty")?
-                    .clone();
+            if let Command::Put { register: selected } = parsed.command {
+                let register = match selected {
+                    None => editor
+                        .unnamed_register()
+                        .ok_or("register is empty")?
+                        .clone(),
+                    Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => editor
+                        .named_register(name)
+                        .ok_or("register is empty")?
+                        .clone(),
+                    Some(name @ '1'..='9') => editor
+                        .numbered_register((name as u8 - b'0') as usize)
+                        .ok_or("register is empty")?
+                        .clone(),
+                    Some(_) => return Err("invalid register".into()),
+                };
                 let lines = match register {
                     crate::editor::Register::Lines(lines) => lines,
                     crate::editor::Register::Characters(text) => {

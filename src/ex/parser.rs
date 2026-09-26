@@ -37,8 +37,8 @@ pub enum Command {
     PrintNext,
     Number,
     Delete,
-    Yank,
-    Put,
+    Yank { register: Option<char> },
+    Put { register: Option<char> },
     Change,
     Append,
     Insert,
@@ -174,12 +174,12 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             }),
         });
     }
-    let command = match name {
+    let mut command = match name {
         "p" | "pr" | "pri" | "prin" | "print" => Command::Print,
         "#" | "nu" | "num" | "numb" | "numbe" | "number" => Command::Number,
         "d" | "de" | "del" | "dele" | "delet" | "delete" => Command::Delete,
-        "y" | "ya" | "yan" | "yank" => Command::Yank,
-        "pu" | "put" => Command::Put,
+        "y" | "ya" | "yan" | "yank" => Command::Yank { register: None },
+        "pu" | "put" => Command::Put { register: None },
         "c" | "ch" | "cha" | "chan" | "chang" | "change" => Command::Change,
         "a" | "ap" | "app" | "appe" | "appen" | "append" => Command::Append,
         "i" | "in" | "ins" | "inse" | "inser" | "insert" => Command::Insert,
@@ -213,6 +213,26 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
     };
     let rest = &s[i..];
     let path = if rest.is_empty() {
+        None
+    } else if matches!(command, Command::Yank { .. } | Command::Put { .. })
+        && rest.starts_with([' ', '\t'])
+    {
+        let argument = rest.trim();
+        let mut chars = argument.chars();
+        let register = chars
+            .next()
+            .filter(|c| c.is_ascii_alphabetic() || ('1'..='9').contains(c));
+        if register.is_none() || chars.next().is_some() {
+            return Err(ParseError::UnexpectedArguments);
+        }
+        if matches!(command, Command::Yank { .. }) && register.is_some_and(|c| c.is_ascii_digit()) {
+            return Err(ParseError::UnexpectedArguments);
+        }
+        command = match command {
+            Command::Yank { .. } => Command::Yank { register },
+            Command::Put { .. } => Command::Put { register },
+            _ => unreachable!(),
+        };
         None
     } else if matches!(
         command,
