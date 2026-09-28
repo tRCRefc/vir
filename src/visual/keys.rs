@@ -15,6 +15,7 @@ pub(super) struct NormalPrefix {
     register_pending: bool,
     selected_register: Option<char>,
     macro_pending: bool,
+    macro_count: bool,
     find_pending: Option<(bool, bool, ReplaceKeys)>,
 }
 
@@ -94,13 +95,14 @@ impl NormalPrefix {
                 *self = Self::default();
                 return Ok(PrefixAction::Pending);
             }
-            let KeyCode::Char(name @ ('a'..='z' | 'A'..='Z' | '1'..='9' | '@')) = key.code else {
+            let KeyCode::Char(name @ ('a'..='z' | 'A'..='Z' | '@')) = key.code else {
                 *self = Self::default();
                 return Err("invalid macro register");
             };
             self.macro_pending = false;
-            self.complete();
-            self.selected_register = None;
+            // ex_vmain.c goes to reread: count/register apply to the first
+            // expanded command. An explicit count in that stream replaces it.
+            self.macro_count = true;
             return Ok(PrefixAction::Macro(name));
         }
         if let Some((forward, till, mut argument)) = self.find_pending.take() {
@@ -145,12 +147,13 @@ impl NormalPrefix {
                 operator,
             });
         }
-        if self.digits != 0
+        if (self.digits != 0 || self.register.is_some())
             && self.operator.is_none()
-            && !matches!(key.code, KeyCode::Char('0'..='9'))
+            && (!matches!(key.code, KeyCode::Char('0'..='9'))
+                || self.macro_count && key.code == KeyCode::Char('0'))
             && let Some(motion) = normal_motion(key)
         {
-            let count = self.digits;
+            let count = self.digits.max(1);
             self.complete();
             return Ok(PrefixAction::Move(motion, count));
         }
@@ -175,6 +178,10 @@ impl NormalPrefix {
             return Ok(PrefixAction::Pending);
         }
         if key.code == KeyCode::Char('@') {
+            if self.operator.is_some() {
+                *self = Self::default();
+                return Err("unsupported operator motion; command cancelled");
+            }
             self.macro_pending = true;
             return Ok(PrefixAction::Pending);
         }
@@ -219,11 +226,15 @@ impl NormalPrefix {
         let KeyCode::Char(c @ '0'..='9') = key.code else {
             return None;
         };
-        if c == '0' && self.digits == 0 {
+        if c == '0' && (self.digits == 0 || self.macro_count) {
             return None;
         }
-        let next = self
-            .digits
+        let digits = if std::mem::take(&mut self.macro_count) {
+            0
+        } else {
+            self.digits
+        };
+        let next = digits
             .checked_mul(10)
             .and_then(|n| n.checked_add((c as u8 - b'0') as usize));
         Some(match next {
@@ -256,6 +267,7 @@ impl NormalPrefix {
         }
         self.operator = Some((requested, self.digits));
         self.digits = 0;
+        self.macro_count = false;
         Some(Ok(PrefixAction::Pending))
     }
 
@@ -668,15 +680,73 @@ mod tests {
     }
 
     #[test]
-    fn macro_prefix_accepts_named_numbered_and_previous_registers() {
+    fn macro_prefix_accepts_only_letters_or_previous_and_rejects_operators() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let mut prefix = NormalPrefix::default();
-        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
-        assert_eq!(prefix.key(key('a')), Ok(PrefixAction::Macro('a')));
-        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
-        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Macro('@')));
-        assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
-        assert_eq!(prefix.key(key('1')), Ok(PrefixAction::Macro('1')));
+        for name in ['a', 'Z', '@'] {
+            assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
+            assert_eq!(prefix.key(key(name)), Ok(PrefixAction::Macro(name)));
+        }
+        for name in ['0', '1', '9', '中', '!'] {
+            prefix.key(key('2')).unwrap();
+            prefix.key(key('@')).unwrap();
+            assert!(prefix.key(key(name)).is_err());
+            assert!(!prefix.is_pending());
+            assert_eq!(prefix.key(key('r')), Ok(PrefixAction::Replace(1)));
+        }
+        for operator in ['d', 'c', 'y'] {
+            prefix.key(key('2')).unwrap();
+            prefix.key(key(operator)).unwrap();
+            assert!(prefix.key(key('@')).is_err());
+            assert!(!prefix.is_pending());
+            assert_eq!(prefix.key(key('r')), Ok(PrefixAction::Replace(1)));
+        }
+    }
+
+    #[test]
+    fn macro_expansion_passes_prefixes_to_first_command_and_replaces_inner_counts() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        for (expanded, expected) in [
+            ("r", PrefixAction::Replace(2)),
+            ("3r", PrefixAction::Replace(3)),
+            ("@br", PrefixAction::Replace(2)),
+            ("@b3r", PrefixAction::Replace(3)),
+            ("0", PrefixAction::Move(Motion::Home, 2)),
+            (
+                "d3w",
+                PrefixAction::Operate(Operator::Delete, Some(Motion::WordForward), Some(6)),
+            ),
+        ] {
+            let mut prefix = NormalPrefix::default();
+            for c in "2@a".chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            let mut result = PrefixAction::Pending;
+            for c in expanded.chars() {
+                result = prefix.key(key(c)).unwrap();
+            }
+            assert_eq!(result, expected, "{expanded}");
+            assert_eq!(prefix.key(key('r')), Ok(PrefixAction::Replace(1)));
+        }
+        for (expanded, register, count) in [("dw", 'b', 2), ("\"c3dw", 'c', 3)] {
+            let mut prefix = NormalPrefix::default();
+            for c in "2\"b@a".chars() {
+                prefix.key(key(c)).unwrap();
+                assert_eq!(prefix.take_register(), None);
+            }
+            let mut result = PrefixAction::Pending;
+            for c in expanded.chars() {
+                result = prefix.key(key(c)).unwrap();
+            }
+            assert_eq!(
+                result,
+                PrefixAction::Operate(Operator::Delete, Some(Motion::WordForward), Some(count))
+            );
+            assert_eq!(prefix.take_register(), Some(register));
+            assert!(!prefix.is_pending());
+            assert_eq!(prefix.key(key('p')), Ok(PrefixAction::Put(false, 1)));
+            assert_eq!(prefix.take_register(), None);
+        }
     }
 
     #[test]

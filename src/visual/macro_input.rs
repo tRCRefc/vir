@@ -35,12 +35,12 @@ impl MacroInput {
         if self.expansions >= MAX_EXPANSIONS {
             return Err("macro expansion limit".into());
         }
-        let register = match name {
-            'a'..='z' | 'A'..='Z' => editor.named_register(name),
-            '1'..='9' => editor.numbered_register((name as u8 - b'0') as usize),
-            _ => None,
+        if !name.is_ascii_alphabetic() {
+            return Err("invalid macro register".into());
         }
-        .ok_or("macro register is empty")?;
+        let register = editor
+            .named_register(name)
+            .ok_or("macro register is empty")?;
         let bytes = match register {
             Register::Characters(text) => text.len(),
             Register::Lines(lines) => lines
@@ -168,7 +168,8 @@ mod tests {
             .unwrap();
         let mut input = MacroInput::default();
         input.expand(&mut editor, 'a').unwrap();
-        for name in ['b', 'c', 'd'] {
+        editor.push_numbered_register(Register::Characters("x".into()));
+        for name in ['b', 'c', 'd', '1'] {
             assert!(input.expand(&mut editor, name).is_err());
         }
         assert_eq!(input.pop(), Some(Event::Key(decode('x'))));

@@ -82,6 +82,7 @@ impl NormalInput {
         if name == '@' {
             self.last_macro
         } else {
+            let name = name.to_ascii_lowercase();
             self.last_macro = Some(name);
             Some(name)
         }
@@ -545,11 +546,13 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     }
                     Ok(PrefixAction::Macro(name)) => {
                         let Some(name) = normal.macro_register(name) else {
+                            normal.cancel();
                             command.error("no previous macro");
                             continue;
                         };
                         if let Err(error) = macros.expand(editor, name) {
                             macros.clear();
+                            normal.cancel();
                             normal.last_macro = None;
                             command.error(error);
                         }

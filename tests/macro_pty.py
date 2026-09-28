@@ -132,4 +132,26 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b"@au", None)], "abcdef")
     case(directory, "line-undo-after-group", [('a', "xx", False)], "abcdef",
         [(b"rZ@auU", None)], "Zbcdef")
+    case(directory, "uppercase-name", [('a', "rZ", False)], "abcdef",
+        [(b"@A", None)], "Zbcdef")
+    case(directory, "count-first-command", [('a', "rZlrQ", False)], "abcdef",
+        [(b"2@a", None)], "ZZQdef")
+    case(directory, "count-overridden", [('a', "3rZ", False)], "abcdef",
+        [(b"2@a", None)], "ZZZdef")
+    case(directory, "count-before-home", [('a', "0rZ", False)], "abcdef",
+        [(b"ll2@a", None)], "Zbcdef")
+    case(directory, "count-nested", [('a', "rZ", False), ('b', "@a", False)], "abcdef",
+        [(b"2@b", None)], "ZZcdef")
+    case(directory, "register-prefix", [('a', "dw", False)], "abc def",
+        [(b'"b@a"bP', None)], "abc def")
+    case(directory, "register-overridden", [('a', '"cyw', False)], "abc def",
+        [(b'"b@a"cP', None)], "abc abc def")
+    case(directory, "operator-rejected", [('a', "d@ax", False)], "abcdef",
+        [(b"@a", b"unsupported operator motion"), (b"rZ", None)], "Zbcdef")
+    case(directory, "number-rejected", [('a', "rZ", False)], "abcdef",
+        [(b"@a@1", b"invalid macro register"), (b"l@@", None)], "ZZcdef")
+    case(directory, "empty-prefix-cleanup", [('a', "rZ", False)], "abcdef",
+        [(b'2"b@z', b"macro register is empty"), (b"rZ", None)], "Zbcdef")
+    case(directory, "previous-prefix-cleanup", [('a', "rZ", False)], "abcdef",
+        [(b'2"b@@', b"no previous macro"), (b"rZ", None)], "Zbcdef")
 print("Macros: input stream, grouped undo/redo, nesting, errors, file boundaries and replay passed")
