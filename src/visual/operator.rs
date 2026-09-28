@@ -171,6 +171,39 @@ impl VisualState {
         if let Some(endpoint) = word_endpoint(buffer, position, motion, steps, operator) {
             return EditRange::from_word_endpoint(buffer, position, endpoint, operator);
         }
+        if let Motion::Find {
+            forward,
+            till,
+            character,
+        } = motion
+        {
+            let target = super::find::target(buffer, position, forward, till, character, steps)
+                .ok_or("character not found")?;
+            let (start, end) = if forward {
+                (
+                    position,
+                    Position {
+                        column: target.column + usize::from(!till),
+                        ..target
+                    },
+                )
+            } else {
+                (
+                    Position {
+                        column: target.column,
+                        ..target
+                    },
+                    Position {
+                        column: position.column + 1,
+                        ..position
+                    },
+                )
+            };
+            if start == end {
+                return Err("empty operator motion".into());
+            }
+            return Ok(EditRange::Characters(start, end));
+        }
         let last = buffer.line_count() - 1;
         let length = buffer.line(self.row).unwrap().chars().count();
         if matches!(motion, Motion::Up | Motion::Down | Motion::Last) {

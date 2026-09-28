@@ -10,6 +10,7 @@ pub(super) struct NormalPrefix {
     register_pending: bool,
     selected_register: Option<char>,
     macro_pending: bool,
+    find_pending: Option<(bool, bool)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -24,6 +25,18 @@ pub(super) enum PrefixAction {
     Operate(Operator, Option<Motion>, Option<usize>),
     Put(bool, usize),
     Macro(char),
+    Find {
+        forward: bool,
+        till: bool,
+        character: char,
+        count: usize,
+        operator: Option<(Operator, Option<usize>)>,
+    },
+    RepeatFind {
+        reverse: bool,
+        count: usize,
+        operator: Option<(Operator, Option<usize>)>,
+    },
 }
 
 impl NormalPrefix {
@@ -33,6 +46,7 @@ impl NormalPrefix {
             || self.register_pending
             || self.register.is_some()
             || self.macro_pending
+            || self.find_pending.is_some()
     }
 
     pub(super) fn take_register(&mut self) -> Option<char> {
@@ -84,6 +98,41 @@ impl NormalPrefix {
             self.selected_register = None;
             return Ok(PrefixAction::Macro(name));
         }
+        if let Some((forward, till)) = self.find_pending {
+            if key.code == KeyCode::Esc
+                || key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                *self = Self::default();
+                return Ok(PrefixAction::Pending);
+            }
+            let KeyCode::Char(character) = key.code else {
+                *self = Self::default();
+                return Err("invalid character search");
+            };
+            let count = self.digits.max(1);
+            let operator = self.operator.map(|(operator, before)| {
+                let count = before.max(1).checked_mul(self.digits.max(1));
+                (
+                    operator,
+                    (before != 0 || self.digits != 0).then_some(count.unwrap_or(0)),
+                )
+            });
+            if operator.is_some_and(|(_, count)| count == Some(0)) {
+                *self = Self::default();
+                return Err("count too large");
+            }
+            self.find_pending = None;
+            self.complete();
+            return Ok(PrefixAction::Find {
+                forward,
+                till,
+                character,
+                count,
+                operator,
+            });
+        }
         if self.digits != 0
             && self.operator.is_none()
             && !matches!(key.code, KeyCode::Char('0'..='9'))
@@ -116,6 +165,30 @@ impl NormalPrefix {
         if key.code == KeyCode::Char('@') {
             self.macro_pending = true;
             return Ok(PrefixAction::Pending);
+        }
+        if let KeyCode::Char(command @ ('f' | 'F' | 't' | 'T')) = key.code {
+            self.find_pending = Some((matches!(command, 'f' | 't'), matches!(command, 't' | 'T')));
+            return Ok(PrefixAction::Pending);
+        }
+        if key.code == KeyCode::Char(';') || key.code == KeyCode::Char(',') {
+            let count = self.digits.max(1);
+            let operator = self.operator.map(|(operator, before)| {
+                let count = before.max(1).checked_mul(self.digits.max(1));
+                (
+                    operator,
+                    (before != 0 || self.digits != 0).then_some(count.unwrap_or(0)),
+                )
+            });
+            if operator.is_some_and(|(_, count)| count == Some(0)) {
+                *self = Self::default();
+                return Err("count too large");
+            }
+            self.complete();
+            return Ok(PrefixAction::RepeatFind {
+                reverse: key.code == KeyCode::Char(','),
+                count,
+                operator,
+            });
         }
         if let Some(result) = self.operator_key(key) {
             return result;
@@ -588,5 +661,54 @@ mod tests {
         assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Macro('@')));
         assert_eq!(prefix.key(key('@')), Ok(PrefixAction::Pending));
         assert_eq!(prefix.key(key('1')), Ok(PrefixAction::Macro('1')));
+    }
+
+    #[test]
+    fn character_find_prefixes_support_counts_repeats_and_operators() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        prefix.key(key('2')).unwrap();
+        assert_eq!(prefix.key(key('f')), Ok(PrefixAction::Pending));
+        assert_eq!(
+            prefix.key(key('x')),
+            Ok(PrefixAction::Find {
+                forward: true,
+                till: false,
+                character: 'x',
+                count: 2,
+                operator: None,
+            })
+        );
+        assert_eq!(
+            prefix.key(key(';')),
+            Ok(PrefixAction::RepeatFind {
+                reverse: false,
+                count: 1,
+                operator: None,
+            })
+        );
+        prefix.key(key('2')).unwrap();
+        prefix.key(key('d')).unwrap();
+        prefix.key(key('f')).unwrap();
+        assert_eq!(
+            prefix.key(key('x')),
+            Ok(PrefixAction::Find {
+                forward: true,
+                till: false,
+                character: 'x',
+                count: 1,
+                operator: Some((Operator::Delete, Some(2))),
+            })
+        );
+        prefix.key(key('d')).unwrap();
+        assert_eq!(
+            prefix.key(key(';')),
+            Ok(PrefixAction::RepeatFind {
+                reverse: false,
+                count: 1,
+                operator: Some((Operator::Delete, None)),
+            })
+        );
+        assert!(!prefix.is_pending());
     }
 }

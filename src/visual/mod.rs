@@ -1,5 +1,6 @@
 //! Visual frontend with search and ex editing commands. Layout is independent of terminal I/O.
 mod command;
+mod find;
 mod input;
 mod input_keys;
 mod insert;
@@ -37,6 +38,11 @@ pub enum Motion {
     BigWordForward,
     BigWordBackward,
     BigWordEnd,
+    Find {
+        forward: bool,
+        till: bool,
+        character: char,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -48,6 +54,7 @@ pub struct VisualState {
     pub left: usize,
     preferred_column: usize,
     search_forward: Option<bool>,
+    last_find: Option<(bool, bool, char)>,
     last_change: Option<repeat::ChangeRecord>,
     line_undo: line_undo::LineUndo,
 }
@@ -150,6 +157,26 @@ impl VisualState {
                 );
                 self.row = position.row;
                 self.column = position.column;
+            }
+            Motion::Find {
+                forward,
+                till,
+                character,
+            } => {
+                if let Some(position) = find::target(
+                    buffer,
+                    crate::buffer::Position {
+                        row: self.row,
+                        column: self.column,
+                    },
+                    forward,
+                    till,
+                    character,
+                    steps,
+                ) {
+                    self.row = position.row;
+                    self.column = position.column;
+                }
             }
             Motion::Left => self.column = self.column.saturating_sub(steps),
             Motion::Right => self.column = self.column.saturating_add(steps),

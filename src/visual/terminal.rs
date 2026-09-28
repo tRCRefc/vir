@@ -470,6 +470,35 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 command.message = None;
                 let action = normal.key(key, editor, &mut state, &mut command);
                 let selected_register = normal.take_register();
+                let action = match action {
+                    Ok(PrefixAction::Find {
+                        forward,
+                        till,
+                        character,
+                        count: _,
+                        operator: Some((operator, operator_count)),
+                    }) => state
+                        .prepare_find_motion(
+                            editor,
+                            forward,
+                            till,
+                            character,
+                            operator_count.unwrap_or(1),
+                        )
+                        .map(|motion| {
+                            PrefixAction::Operate(operator, Some(motion), operator_count)
+                        }),
+                    Ok(PrefixAction::RepeatFind {
+                        reverse,
+                        count: _,
+                        operator: Some((operator, operator_count)),
+                    }) => state
+                        .prepare_repeat_find_motion(editor, reverse, operator_count.unwrap_or(1))
+                        .map(|motion| {
+                            PrefixAction::Operate(operator, Some(motion), operator_count)
+                        }),
+                    other => other,
+                };
                 match action {
                     Ok(PrefixAction::Pending) => continue,
                     Ok(PrefixAction::Insert(mode, count)) => {
@@ -520,6 +549,39 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                             };
                             macro_events.push(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
                         }
+                        continue;
+                    }
+                    Ok(PrefixAction::Find {
+                        forward,
+                        till,
+                        character,
+                        count,
+                        operator: None,
+                    }) => {
+                        if let Err(error) =
+                            state.find_character(editor, forward, till, character, count)
+                        {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
+                    Ok(PrefixAction::RepeatFind {
+                        reverse,
+                        count,
+                        operator: None,
+                    }) => {
+                        if let Err(error) = state.repeat_find(editor, reverse, count) {
+                            command.message = Some(format!("? {error}"));
+                        }
+                        continue;
+                    }
+                    Ok(PrefixAction::Find {
+                        operator: Some(_), ..
+                    })
+                    | Ok(PrefixAction::RepeatFind {
+                        operator: Some(_), ..
+                    }) => {
+                        command.message = Some("? invalid character search".into());
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Yank, motion, count)) => {

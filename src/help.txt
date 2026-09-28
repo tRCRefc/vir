@@ -135,6 +135,10 @@ and Ctrl-B/Ctrl-F. 2$ reaches the next line end; 5G (or 5g) goes to line 5.
 Targets clamp to the buffer; g/G without a count retain first/last behavior.
 Home ignores the count; 0 by itself moves to line start, digits such as
 10j form one count. Movement never changes text or undo.
+f/F find the next/previous typed character on the current line; t/T stop just
+before/after it. Counts repeat the search. ; repeats the last character search,
+and , repeats it in the opposite direction. These motions work with d/c/y;
+they fail without changing text when the character is not found.
 J joins two lines; a count (such as 3J) joins that many lines, clamped at
 the last line. Leading spaces/Tabs on following lines are removed. A
 space separates text, two after a period, none before a closing parenthesis
