@@ -396,7 +396,9 @@ fn input_session(
 
 pub fn run(editor: &mut Editor) -> io::Result<()> {
     let mut recovery = Recovery::for_editor(editor)?;
-    run_session(editor, &mut recovery)?;
+    let result = run_session(editor, &mut recovery);
+    editor.end_macro_undo();
+    result?;
     recovery.finish()
 }
 
@@ -424,6 +426,11 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
         if std::mem::take(&mut command.failed) {
             macros.clear();
         }
+        // An input transaction can consume the end of the stream while it
+        // borrows Editor. Finish its edit, then close the invocation here.
+        if !macros.is_active() {
+            editor.end_macro_undo();
+        }
         if let Err(error) = recovery.observe(editor) {
             command.message = Some(format!("? recovery unavailable: {error}"));
         }
@@ -447,6 +454,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
         // Some terminal environments do not deliver resize events reliably.
         // Check dimensions while idle as well, including during command input.
         let event = next_event(width, height, &mut macros)?;
+        if !macros.is_active() {
+            editor.end_macro_undo();
+        }
         match event {
             Event::Resize(w, h) => {
                 width = w;

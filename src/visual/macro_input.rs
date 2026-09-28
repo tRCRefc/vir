@@ -12,6 +12,10 @@ pub(super) struct MacroInput {
 }
 
 impl MacroInput {
+    pub(super) fn is_active(&self) -> bool {
+        self.expansions != 0
+    }
+
     pub(super) fn pop(&mut self) -> Option<Event> {
         let event = self.events.pop();
         if event.is_none() {
@@ -27,7 +31,7 @@ impl MacroInput {
         self.expansions = 0;
     }
 
-    pub(super) fn expand(&mut self, editor: &Editor, name: char) -> Result<(), String> {
+    pub(super) fn expand(&mut self, editor: &mut Editor, name: char) -> Result<(), String> {
         if self.expansions >= MAX_EXPANSIONS {
             return Err("macro expansion limit".into());
         }
@@ -61,6 +65,7 @@ impl MacroInput {
         self.events
             .extend(text.chars().rev().map(|c| Event::Key(decode(c))));
         self.expansions += 1;
+        editor.begin_macro_undo();
         Ok(())
     }
 }
@@ -99,9 +104,9 @@ mod tests {
             .set_named_register('b', Register::Lines(vec![":s/a/b/".into()]), false)
             .unwrap();
         let mut input = MacroInput::default();
-        input.expand(&editor, 'a').unwrap();
+        input.expand(&mut editor, 'a').unwrap();
         assert_eq!(input.pop(), Some(Event::Key(decode('i'))));
-        input.expand(&editor, 'b').unwrap();
+        input.expand(&mut editor, 'b').unwrap();
         for c in ":s/a/b/\n中\x1b\x16\x03\t\x7f".chars() {
             assert_eq!(input.pop(), Some(Event::Key(decode(c))));
         }
@@ -136,17 +141,17 @@ mod tests {
             .unwrap();
         let mut input = MacroInput::default();
         for _ in 0..MAX_EXPANSIONS + 5 {
-            input.expand(&editor, 'a').unwrap();
+            input.expand(&mut editor, 'a').unwrap();
             while input.pop().is_some() {}
         }
         for _ in 0..MAX_EXPANSIONS {
-            input.expand(&editor, 'a').unwrap();
+            input.expand(&mut editor, 'a').unwrap();
             assert!(input.pop().is_some());
             assert!(input.pop().is_some());
         }
-        assert!(input.expand(&editor, 'a').is_err());
+        assert!(input.expand(&mut editor, 'a').is_err());
         input.clear();
-        assert!(input.expand(&editor, 'a').is_ok());
+        assert!(input.expand(&mut editor, 'a').is_ok());
     }
 
     #[test]
@@ -162,9 +167,9 @@ mod tests {
             .set_named_register('c', Register::Characters(String::new()), false)
             .unwrap();
         let mut input = MacroInput::default();
-        input.expand(&editor, 'a').unwrap();
+        input.expand(&mut editor, 'a').unwrap();
         for name in ['b', 'c', 'd'] {
-            assert!(input.expand(&editor, name).is_err());
+            assert!(input.expand(&mut editor, name).is_err());
         }
         assert_eq!(input.pop(), Some(Event::Key(decode('x'))));
         assert_eq!(input.pop(), None);

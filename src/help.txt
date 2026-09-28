@@ -111,8 +111,10 @@ consume the same stream, including Escape, Tab and quoted control keys.
 Linewise registers include a final Enter. A failed command stops the pending
 macro; completed edits remain. Each physical invocation allows at most 100
 expansions and 65,536 pending keys (register byte size is checked first).
-Macros currently use individual-command undo; there is no recording command
-or session persistence.
+Multiple edits in a macro share one reversible undo snapshot. A nested call
+starts a new group if its parent has made fewer than two edits; otherwise
+it shares the existing group. A successful :e starts fresh undo history.
+There is no recording command or session persistence.
 w/b/e move to the next word start, previous word start, or word end;
 counts such as 3w repeat the motion. Words group Unicode letters/numbers
 and underscore separately from punctuation; Unicode whitespace separates

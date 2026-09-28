@@ -3,6 +3,8 @@ use crate::buffer::Position;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UndoLocation {
+    /// Whole-buffer macro undo swaps the live dot with the saved dot.
+    Buffer,
     Character(Position),
     /// Cross-line d/c preserve the range column only for the first undo.
     InitialCharacter(Position),
@@ -22,7 +24,7 @@ impl UndoLocation {
                     opposite: p.row,
                 };
             }
-            Self::Character(_) => {}
+            Self::Character(_) | Self::Buffer => {}
         }
     }
 }

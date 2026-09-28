@@ -9,14 +9,14 @@ impl VisualState {
         let row = match anchor {
             Some(UndoLocation::Character(p) | UndoLocation::InitialCharacter(p)) => p.row,
             Some(UndoLocation::Lines { next, .. }) => next,
-            None => editor.current().unwrap_or(0),
+            None | Some(UndoLocation::Buffer) => editor.current().unwrap_or(0),
         };
         self.row = row.min(editor.buffer().line_count().saturating_sub(1));
         let line = editor.buffer().line(self.row).unwrap_or("");
         let length = line.chars().count();
         self.column = match anchor {
             Some(UndoLocation::Character(p) | UndoLocation::InitialCharacter(p)) => p.column,
-            Some(UndoLocation::Lines { .. }) => line
+            Some(UndoLocation::Lines { .. } | UndoLocation::Buffer) => line
                 .chars()
                 .position(|c| c != ' ' && c != '\t')
                 .unwrap_or(length),
@@ -26,6 +26,9 @@ impl VisualState {
         self.preferred_column = self.column;
         self.left = 0;
         self.top = self.top.min(self.row);
+        if anchor == Some(UndoLocation::Buffer) {
+            self.forget_line();
+        }
         if !editor.buffer().is_empty() {
             editor.set_current(self.row).map_err(|e| format!("{e:?}"))?;
         }

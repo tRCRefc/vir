@@ -90,7 +90,7 @@ impl VisualState {
             end,
         )?;
         edit.insert(original)?;
-        edit.commit_even_if_unchanged()?;
+        edit.commit_line_restore()?;
         self.column = 0;
         self.preferred_column = 0;
         self.left = 0;

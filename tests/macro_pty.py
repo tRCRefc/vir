@@ -83,4 +83,53 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b"@a", b"macro register is empty")], "abc")
     case(directory, "recursion", [('r', "@r", False), ('a', "A!\x1b", False)], "tail",
         [(b"@r", b"macro expansion limit"), (b"@a", b"tail!")], "tail!")
-print("Macros: input modes, quoting, nested expansion, linewise ex, errors and recursion passed")
+    case(directory, "group-undo", [('a', "xx", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "group-redo", [('a', "xx", False)], "abcdef",
+        [(b"@auu", None)], "cdef")
+    case(directory, "input-group", [('a', "A!\x1b0rZ", False)], "tail",
+        [(b"@au", None)], "tail")
+    case(directory, "open-line-group", [('a', "oX\x1bkx", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "dot-in-macro", [('a', "x.", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "no-change-history", [('a', "h", False)], "abc",
+        [(b"rZ@au", None)], "abc")
+    case(directory, "same-text-history", [('a', "rZrZ", False)], "abc",
+        [(b"rZ@au", None)], "Zbc")
+    case(directory, "nested-undo", [('a', "A!\x1b", False), ('b', "@a0rZ", False)], "tail",
+        [(b"@bu", None)], "tail")
+    case(directory, "nested-after-one", [('a', "xx", False), ('b', "x@a", False)], "abcdef",
+        [(b"@bu", None)], "bcdef")
+    case(directory, "nested-after-two", [('a', "x", False), ('b', "xx@a", False)], "abcdef",
+        [(b"@bu", None)], "abcdef")
+    case(directory, "error-group", [('a', "xxfzx", False)], "abcdef",
+        [(b"@a", b"character not found"), (b"u", None)], "abcdef")
+    case(directory, "undo-in-macro", [('a', "xxu", False)], "abcdef",
+        [(b"@a", b"abcdef"), (b"u", None)], "cdef")
+    case(directory, "undo-then-edit", [('a', "xxurZ", False)], "abcdef",
+        [(b"@au", None)], "cdef")
+    case(directory, "colon-undo-in-macro", [('u', ":u", True), ('a', "xx@u", False)], "abcdef",
+        [(b"@au", None)], "cdef")
+    case(directory, "save-in-macro", [('w', ":w", True), ('a', "xx@wx", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "reload-in-macro", [('e', ":e!", True), ('a', "xx@exx", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "dot-after-macro", [('a', "xx", False)], "abcdef",
+        [(b"@au.", None)], "bcdef")
+    case(directory, "put-after-macro", [('a', "xx", False)], "abcdef",
+        [(b"@aup", None)], "abbcdef")
+    case(directory, "unfinished-input", [('a', "xA!", False)], "abcdef",
+        [(b"@a", b"[INSERT]"), (b"?", b"bcdef!?"),
+         (b"\x1b", b"[VIEW]"), (b"u", None)], "abcdef")
+    case(directory, "unfinished-replace", [('a', "xr", False)], "abcdef",
+        [(b"@a", b"bcdef"), (b"Zu", None)], "bcdef")
+    case(directory, "unfinished-colon", [('a', "xx:s/c/Z/", False)], "abcdef",
+        [(b"@a", b":s/c/Z/"), (b"\ru", None)], "cdef")
+    case(directory, "line-undo-after-one", [('a', "xU", False)], "abcdef",
+        [(b"@au", None)], "bcdef")
+    case(directory, "line-undo-in-group", [('a', "xxUu", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "line-undo-after-group", [('a', "xx", False)], "abcdef",
+        [(b"rZ@auU", None)], "Zbcdef")
+print("Macros: input stream, grouped undo/redo, nesting, errors, file boundaries and replay passed")

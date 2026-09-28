@@ -504,23 +504,35 @@ impl TextEdit<'_> {
     }
 
     pub fn commit(self) -> Result<Position, String> {
-        self.commit_inner(false)
+        self.commit_inner(false, false)
     }
 
     /// Publish a successful visual command whose semantics replace unchanged undo.
     pub(crate) fn commit_even_if_unchanged(self) -> Result<Position, String> {
-        self.commit_inner(true)
+        self.commit_inner(true, false)
     }
 
-    fn commit_inner(self, publish_unchanged: bool) -> Result<Position, String> {
+    pub(crate) fn commit_line_restore(self) -> Result<Position, String> {
+        self.commit_inner(true, true)
+    }
+
+    fn commit_inner(self, publish_unchanged: bool, line_restore: bool) -> Result<Position, String> {
         if publish_unchanged || self.draft != self.editor.buffer {
             let row = self.cursor.row;
             let location = self.undo_location();
-            self.editor.edit(move |buffer| {
-                *buffer = self.draft;
-                Ok(if buffer.is_empty() { None } else { Some(row) })
-            })?;
-            self.editor.undo_location = location;
+            let publish = |editor: &mut Editor| {
+                editor.edit(move |buffer| {
+                    *buffer = self.draft;
+                    Ok(if buffer.is_empty() { None } else { Some(row) })
+                })?;
+                editor.set_undo_location(location);
+                Ok(())
+            };
+            if line_restore {
+                self.editor.with_line_undo(publish)?;
+            } else {
+                publish(self.editor)?;
+            }
         }
         if let Some(register) = self.pending_register {
             self.editor.unnamed = Some(register);

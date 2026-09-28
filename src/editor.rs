@@ -1,9 +1,11 @@
 //! Shared ex/visual state. Frontends cannot independently mutate its text or dot.
 
 use std::{borrow::Cow, io};
+mod macro_undo;
 mod register;
 mod text_edit;
 mod undo_location;
+use macro_undo::MacroUndo;
 pub use register::Register;
 use register::RegisterBank;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ pub struct Editor {
     last_search: Option<String>,
     undo: Option<(TextBuffer, Option<usize>)>,
     undo_location: Option<UndoLocation>,
+    macro_undo: MacroUndo,
     edit_generation: u64,
     autoindent: bool,
 }
@@ -157,8 +160,7 @@ impl Editor {
         let mut buffer = self.buffer.clone();
         let current = apply(&mut buffer).map_err(str::to_owned)?;
         let previous = std::mem::replace(&mut self.buffer, buffer);
-        self.undo = Some((previous, self.current));
-        self.undo_location = None;
+        self.save_undo(previous);
         self.current = current;
         self.modified = true;
         self.edit_generation = self.edit_generation.wrapping_add(1);
@@ -178,7 +180,13 @@ impl Editor {
 
     /// Attach direction-specific rows after a successful visual whole-line edit.
     pub(crate) fn set_line_undo(&mut self, next: usize, opposite: usize) {
-        self.undo_location = Some(UndoLocation::Lines { next, opposite });
+        self.set_undo_location(Some(UndoLocation::Lines { next, opposite }));
+    }
+
+    fn set_undo_location(&mut self, location: Option<UndoLocation>) {
+        if self.macro_undo.uses_line_undo() {
+            self.undo_location = location;
+        }
     }
 
     /// Original ex undo is its own inverse; it is a change even if it restores
@@ -231,6 +239,7 @@ impl Editor {
         loaded.unnamed = self.unnamed.clone();
         loaded.registers = self.registers.clone();
         loaded.autoindent = self.autoindent;
+        loaded.macro_undo = self.macro_undo.after_reload();
         *self = loaded;
         Ok(())
     }
