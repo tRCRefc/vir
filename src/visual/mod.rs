@@ -6,6 +6,7 @@ mod input_keys;
 mod insert;
 mod keys;
 mod line_undo;
+mod macro_input;
 pub use input::InputSession;
 mod motion;
 mod operator;

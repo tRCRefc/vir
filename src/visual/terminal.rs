@@ -1,6 +1,7 @@
 use super::input::InputSession;
 use super::input_keys::{InputKeys, ReplaceKey, ReplaceKeys};
 use super::keys::{NormalPrefix, PrefixAction, normal_motion};
+use super::macro_input::MacroInput;
 use super::operator::Operator;
 use super::paste::normalize;
 use super::{InputStart, Motion, VisualState, clip, screen_column};
@@ -50,6 +51,7 @@ struct CommandLine {
     message: Option<String>,
     search_direction: Option<bool>,
     input_error: Option<String>,
+    failed: bool,
 }
 
 /// Prefixes and one-character replacement share cancellation, but not decoding.
@@ -154,6 +156,11 @@ fn draw_frame<W: Write>(output: &mut W, frame: &super::Frame, height: u16) -> io
 }
 
 impl CommandLine {
+    fn error(&mut self, error: impl std::fmt::Display) {
+        self.message = Some(format!("? {error}"));
+        self.failed = true;
+    }
+
     fn execute(&mut self, text: &str, editor: &mut Editor, state: &mut VisualState) -> bool {
         let result = state.execute_ex(text, editor);
         match result {
@@ -166,7 +173,7 @@ impl CommandLine {
                 result.quit
             }
             Err(error) => {
-                self.message = Some(format!("? {error}"));
+                self.error(error);
                 false
             }
         }
@@ -215,7 +222,7 @@ impl CommandLine {
         let text = self.input.take().unwrap();
         if let Some(forward) = self.search_direction {
             if let Err(error) = state.search(editor, &text, forward) {
-                self.message = Some(format!("? {error}"));
+                self.error(error);
             }
         } else if !text.trim().is_empty() && self.execute(&text, editor, state) {
             return true;
@@ -280,13 +287,14 @@ fn insert_mode(
     width: &mut u16,
     height: &mut u16,
     recovery: &mut Recovery,
+    macros: &mut MacroInput,
 ) -> io::Result<()> {
     let name = editor_title(editor);
     let (mode, count) = request;
     let session = state
         .begin_counted_insert(editor, mode, count)
         .map_err(io::Error::other)?;
-    input_session(session, state, &name, width, height, recovery)
+    input_session(session, state, &name, width, height, recovery, macros)
 }
 
 fn input_session(
@@ -296,6 +304,7 @@ fn input_session(
     width: &mut u16,
     height: &mut u16,
     recovery: &mut Recovery,
+    macros: &mut MacroInput,
 ) -> io::Result<()> {
     let mode = edit.mode();
     let mut input_error = None;
@@ -347,7 +356,7 @@ fn input_session(
             let mut output = io::stdout().lock();
             draw_frame(&mut output, &frame, *height)?;
             drop(output);
-            match read_event(*width, *height)? {
+            match next_event(*width, *height, macros)? {
                 Event::Resize(w, h) => {
                     *width = w;
                     *height = h;
@@ -365,7 +374,10 @@ fn input_session(
                     match done {
                         Ok(true) => return Ok(()),
                         Ok(false) => {}
-                        Err(error) => input_error = Some(error),
+                        Err(error) => {
+                            macros.clear();
+                            input_error = Some(error);
+                        }
                     }
                 }
                 _ => {}
@@ -388,16 +400,11 @@ pub fn run(editor: &mut Editor) -> io::Result<()> {
     recovery.finish()
 }
 
-fn macro_text(editor: &Editor, name: char) -> Option<String> {
-    let register = match name {
-        'a'..='z' | 'A'..='Z' => editor.named_register(name),
-        '1'..='9' => editor.numbered_register((name as u8 - b'0') as usize),
-        _ => None,
-    }?;
-    Some(match register {
-        crate::editor::Register::Characters(text) => text.clone(),
-        crate::editor::Register::Lines(lines) => lines.join("\n"),
-    })
+fn next_event(width: u16, height: u16, macros: &mut MacroInput) -> io::Result<Event> {
+    macros
+        .pop()
+        .map(Ok)
+        .unwrap_or_else(|| read_event(width, height))
 }
 
 fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
@@ -410,10 +417,13 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
     let mut state = VisualState::default();
     let mut command = CommandLine::default();
     let mut normal = NormalInput::default();
-    let mut macro_events = Vec::new();
-    let mut macro_expansions = 0usize;
+    let mut macros = MacroInput::default();
     let (mut width, mut height) = terminal::size()?;
     loop {
+        // ex_voper.c errlab discards the pending macro after a failed motion.
+        if std::mem::take(&mut command.failed) {
+            macros.clear();
+        }
         if let Err(error) = recovery.observe(editor) {
             command.message = Some(format!("? recovery unavailable: {error}"));
         }
@@ -436,10 +446,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
         drop(output);
         // Some terminal environments do not deliver resize events reliably.
         // Check dimensions while idle as well, including during command input.
-        let event = macro_events
-            .pop()
-            .map(Ok)
-            .unwrap_or_else(|| read_event(width, height))?;
+        let event = next_event(width, height, &mut macros)?;
         match event {
             Event::Resize(w, h) => {
                 width = w;
@@ -509,45 +516,32 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                             &mut width,
                             &mut height,
                             recovery,
+                            &mut macros,
                         )?;
                         continue;
                     }
                     Ok(PrefixAction::Replace(count)) => {
                         match state.replacement_end(editor, count) {
                             Ok(_) => normal.replacement = Some(ReplaceKeys::new(count)),
-                            Err(error) => command.message = Some(format!("? {error}")),
+                            Err(error) => command.error(error),
                         }
                         continue;
                     }
                     Ok(PrefixAction::Repeat(count)) => {
                         if let Err(error) = state.repeat_change(editor, count) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
                     Ok(PrefixAction::Macro(name)) => {
                         let Some(name) = normal.macro_register(name) else {
-                            command.message = Some("? no previous macro".into());
+                            command.error("no previous macro");
                             continue;
                         };
-                        macro_expansions = macro_expansions.saturating_add(1);
-                        if macro_expansions > 100 {
-                            command.message = Some("? macro expansion limit".into());
-                            macro_events.clear();
-                            macro_expansions = 0;
-                            continue;
-                        }
-                        let Some(register) = macro_text(editor, name) else {
-                            command.message = Some("? macro register is empty".into());
-                            continue;
-                        };
-                        for character in register.chars().rev() {
-                            let code = if character == '\n' {
-                                KeyCode::Enter
-                            } else {
-                                KeyCode::Char(character)
-                            };
-                            macro_events.push(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+                        if let Err(error) = macros.expand(editor, name) {
+                            macros.clear();
+                            normal.last_macro = None;
+                            command.error(error);
                         }
                         continue;
                     }
@@ -561,7 +555,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         if let Err(error) =
                             state.find_character(editor, forward, till, character, count)
                         {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -571,7 +565,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         operator: None,
                     }) => {
                         if let Err(error) = state.repeat_find(editor, reverse, count) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -581,14 +575,14 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     | Ok(PrefixAction::RepeatFind {
                         operator: Some(_), ..
                     }) => {
-                        command.message = Some("? invalid character search".into());
+                        command.error("invalid character search");
                         continue;
                     }
                     Ok(PrefixAction::Operate(Operator::Yank, motion, count)) => {
                         if let Err(error) =
                             state.yank_register(editor, motion, count, selected_register)
                         {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -596,7 +590,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         if let Err(error) =
                             state.put_selected(editor, before, count, selected_register)
                         {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -623,8 +617,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                                 &mut width,
                                 &mut height,
                                 recovery,
+                                &mut macros,
                             )?,
-                            Err(error) => command.message = Some(format!("? {error}")),
+                            Err(error) => command.error(error),
                         }
                         continue;
                     }
@@ -632,7 +627,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         if let Err(error) =
                             state.delete_motion_register(editor, motion, count, selected_register)
                         {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -642,7 +637,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     }
                     Ok(PrefixAction::Join(count)) => {
                         if let Err(error) = state.join_lines(editor, count) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -652,12 +647,12 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                             count.unwrap_or(1),
                             selected_register,
                         ) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
                     Err(error) => {
-                        command.message = Some(format!("? {error}"));
+                        command.error(error);
                         continue;
                     }
                     Ok(PrefixAction::Pass) => {}
@@ -674,24 +669,25 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                             &mut width,
                             &mut height,
                             recovery,
+                            &mut macros,
                         )?;
                         continue;
                     }
                     if key.code == KeyCode::Char('U') {
                         if let Err(error) = state.restore_line(editor) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
                     if key.code == KeyCode::Char('u') {
                         if let Err(error) = state.undo(editor) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
                     if key.code == KeyCode::Char('x') {
                         if let Err(error) = state.delete_character(editor) {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -705,7 +701,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         if state.column < length
                             && let Err(error) = state.delete_motion(editor, Motion::End, None)
                         {
-                            command.message = Some(format!("? {error}"));
+                            command.error(error);
                         }
                         continue;
                     }
@@ -726,7 +722,7 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 if key.code == KeyCode::Char('n') || key.code == KeyCode::Char('N') {
                     if let Err(error) = state.repeat_search(editor, key.code == KeyCode::Char('N'))
                     {
-                        command.message = Some(format!("? {error}"));
+                        command.error(error);
                     }
                     continue;
                 }
@@ -862,6 +858,7 @@ mod tests {
             message: None,
             search_direction: None,
             input_error: None,
+            failed: false,
         };
         for c in "w 中文".chars() {
             command.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
