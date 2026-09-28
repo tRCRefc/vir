@@ -139,6 +139,10 @@ f/F find the next/previous typed character on the current line; t/T stop just
 before/after it. Counts repeat the search. ; repeats the last character search,
 and , repeats it in the opposite direction. These motions work with d/c/y;
 they fail without changing text when the character is not found.
+Forward operators include the landing character; backward operators exclude
+the original cursor character. Tab and Ctrl-V/Ctrl-Q quoting are accepted.
+An explicit failed character search still becomes the next ;/, search.
+Repeating t/T can stay in place at an adjacent target, as in historical vi.
 J joins two lines; a count (such as 3J) joins that many lines, clamped at
 the last line. Leading spaces/Tabs on following lines are removed. A
 space separates text, two after a period, none before a closing parenthesis

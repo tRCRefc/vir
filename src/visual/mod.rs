@@ -43,6 +43,9 @@ pub enum Motion {
         till: bool,
         character: char,
     },
+    RepeatFind {
+        reverse: bool,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -140,6 +143,12 @@ impl VisualState {
             Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown
         );
         match motion {
+            Motion::RepeatFind { reverse } => {
+                if let Ok(motion) = self.repeated_find_motion(reverse) {
+                    self.move_counted(motion, count, buffer, height);
+                }
+                return;
+            }
             Motion::WordForward
             | Motion::WordBackward
             | Motion::WordEnd

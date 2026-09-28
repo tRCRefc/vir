@@ -19,18 +19,29 @@ pub(super) fn target(
     if origin.column >= length {
         return None;
     }
-    let mut column = origin.column;
-    for _ in 0..count.max(1) {
-        let found = if forward {
-            (column.saturating_add(1)..length)
-                .find(|&candidate| line.chars().nth(candidate) == Some(character))
-        } else {
-            (0..column)
-                .rev()
-                .find(|&candidate| line.chars().nth(candidate) == Some(character))
-        }?;
-        column = found;
-    }
+    let mut matches = line.chars().enumerate().filter_map(|(column, c)| {
+        (c == character
+            && if forward {
+                column > origin.column
+            } else {
+                column < origin.column
+            })
+        .then_some(column)
+    });
+    let mut column = if forward {
+        matches.nth(count.max(1) - 1)?
+    } else {
+        // Reverse scalar indices without repeatedly rescanning UTF-8 prefixes.
+        let offset = line
+            .chars()
+            .rev()
+            .enumerate()
+            .filter_map(|(offset, c)| {
+                (c == character && length - 1 - offset < origin.column).then_some(offset)
+            })
+            .nth(count.max(1) - 1)?;
+        length - 1 - offset
+    };
     if till {
         // `t` stops before the target, while `T` stops after it. The
         // adjustment happens after all counted searches, as in vi.
@@ -47,8 +58,8 @@ pub(super) fn target(
 }
 
 impl VisualState {
-    /// Move to a character on the current line. Failed searches preserve the
-    /// cursor and the previous repeat recipe.
+    /// Move to a character on the current line. Historical vi remembers an
+    /// explicit search before testing whether its character can be found.
     pub fn find_character(
         &mut self,
         editor: &Editor,
@@ -61,12 +72,12 @@ impl VisualState {
             row: self.row,
             column: self.column,
         };
+        self.last_find = Some((forward, till, character));
         let target = target(editor.buffer(), origin, forward, till, character, count)
             .ok_or("character not found")?;
         self.row = target.row;
         self.column = target.column;
         self.preferred_column = self.column;
-        self.last_find = Some((forward, till, character));
         Ok(())
     }
 
@@ -111,9 +122,9 @@ impl VisualState {
             row: self.row,
             column: self.column,
         };
+        self.last_find = Some((forward, till, character));
         target(editor.buffer(), origin, forward, till, character, count)
             .ok_or("character not found")?;
-        self.last_find = Some((forward, till, character));
         Ok(Motion::Find {
             forward,
             till,
@@ -141,8 +152,15 @@ impl VisualState {
             count,
         )
         .ok_or("character not found")?;
+        // Retain ; or , in the dot recipe: historical replay reads the then
+        // current lastFKND/lastFCHR, rather than baking in today's character.
+        Ok(Motion::RepeatFind { reverse })
+    }
+
+    pub(super) fn repeated_find_motion(&self, reverse: bool) -> Result<Motion, String> {
+        let (forward, till, character) = self.last_find.ok_or("no previous character search")?;
         Ok(Motion::Find {
-            forward: effective_forward,
+            forward: forward ^ reverse,
             till,
             character,
         })

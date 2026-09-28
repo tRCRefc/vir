@@ -158,6 +158,11 @@ impl VisualState {
         count: Option<usize>,
         operator: Operator,
     ) -> Result<EditRange, String> {
+        let motion = if let Motion::RepeatFind { reverse } = motion {
+            self.repeated_find_motion(reverse)?
+        } else {
+            motion
+        };
         let buffer = editor.buffer();
         let position = Position {
             row: self.row,
@@ -183,7 +188,7 @@ impl VisualState {
                 (
                     position,
                     Position {
-                        column: target.column + usize::from(!till),
+                        column: target.column + 1,
                         ..target
                     },
                 )
@@ -193,10 +198,7 @@ impl VisualState {
                         column: target.column,
                         ..target
                     },
-                    Position {
-                        column: position.column + 1,
-                        ..position
-                    },
+                    position,
                 )
             };
             if start == end {

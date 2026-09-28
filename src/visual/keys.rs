@@ -1,5 +1,10 @@
 //! Normal-mode counts and command prefixes; no terminal I/O or text mutation.
-use super::{InputStart, Motion, input::MAX_INPUT_WORK, operator::Operator};
+use super::{
+    InputStart, Motion,
+    input::MAX_INPUT_WORK,
+    input_keys::{ReplaceKey, ReplaceKeys},
+    operator::Operator,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Default)]
@@ -10,7 +15,7 @@ pub(super) struct NormalPrefix {
     register_pending: bool,
     selected_register: Option<char>,
     macro_pending: bool,
-    find_pending: Option<(bool, bool)>,
+    find_pending: Option<(bool, bool, ReplaceKeys)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -98,18 +103,25 @@ impl NormalPrefix {
             self.selected_register = None;
             return Ok(PrefixAction::Macro(name));
         }
-        if let Some((forward, till)) = self.find_pending {
-            if key.code == KeyCode::Esc
-                || key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            {
-                *self = Self::default();
-                return Ok(PrefixAction::Pending);
-            }
-            let KeyCode::Char(character) = key.code else {
-                *self = Self::default();
-                return Err("invalid character search");
+        if let Some((forward, till, mut argument)) = self.find_pending.take() {
+            let character = match argument.key(key) {
+                Ok(ReplaceKey::Character(character)) => character,
+                Ok(ReplaceKey::Pending) => {
+                    self.find_pending = Some((forward, till, argument));
+                    return Ok(PrefixAction::Pending);
+                }
+                Ok(ReplaceKey::Cancel) => {
+                    *self = Self::default();
+                    return Ok(PrefixAction::Pending);
+                }
+                Err(_) => {
+                    if argument.is_quoted() {
+                        self.find_pending = Some((forward, till, argument));
+                    } else {
+                        *self = Self::default();
+                    }
+                    return Err("invalid character search");
+                }
             };
             let count = self.digits.max(1);
             let operator = self.operator.map(|(operator, before)| {
@@ -167,7 +179,11 @@ impl NormalPrefix {
             return Ok(PrefixAction::Pending);
         }
         if let KeyCode::Char(command @ ('f' | 'F' | 't' | 'T')) = key.code {
-            self.find_pending = Some((matches!(command, 'f' | 't'), matches!(command, 't' | 'T')));
+            self.find_pending = Some((
+                matches!(command, 'f' | 't'),
+                matches!(command, 't' | 'T'),
+                ReplaceKeys::new(1),
+            ));
             return Ok(PrefixAction::Pending);
         }
         if key.code == KeyCode::Char(';') || key.code == KeyCode::Char(',') {
@@ -710,5 +726,74 @@ mod tests {
             })
         );
         assert!(!prefix.is_pending());
+    }
+    #[test]
+    fn find_arguments_cancel_quote_and_keep_register_and_multiplied_counts() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        for c in "\"a2d3t".chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        assert_eq!(
+            prefix.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+            Ok(PrefixAction::Find {
+                forward: true,
+                till: true,
+                character: '\t',
+                count: 3,
+                operator: Some((Operator::Delete, Some(6))),
+            })
+        );
+        assert_eq!(prefix.take_register(), Some('a'));
+        for cancel in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            for c in "\"a2d3F".chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            assert_eq!(prefix.key(cancel), Ok(PrefixAction::Pending));
+            assert!(!prefix.is_pending());
+            assert_eq!(prefix.take_register(), None);
+            assert_eq!(prefix.key(key('p')), Ok(PrefixAction::Put(false, 1)));
+        }
+        prefix.key(key('f')).unwrap();
+        prefix
+            .key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert!(
+            prefix
+                .key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+                .is_err()
+        );
+        assert!(prefix.is_pending());
+        assert_eq!(
+            prefix.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Ok(PrefixAction::Find {
+                forward: true,
+                till: false,
+                character: '\x1b',
+                count: 1,
+                operator: None,
+            })
+        );
+        for suffix in ['f', ';', ','] {
+            for c in usize::MAX.to_string().chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            prefix.key(key('d')).unwrap();
+            prefix.key(key('2')).unwrap();
+            let result = prefix.key(key(suffix));
+            assert!(
+                if suffix == 'f' {
+                    prefix.key(key('x'))
+                } else {
+                    result
+                }
+                .is_err()
+            );
+            assert!(!prefix.is_pending());
+            assert_eq!(prefix.take_register(), None);
+        }
     }
 }

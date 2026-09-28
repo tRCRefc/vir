@@ -1003,7 +1003,53 @@ def multiline_input_undo_session(directory):
         os.close(slave)
 
 
+def character_find_session(directory):
+    path = directory / "character-find"
+    path.write_text("a中b中c中\na中b中c中\na\tb\n")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 120, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"1/3  col 1")
+        for keys, marker in [
+            ("2f中".encode(), b"1/3  col 4"),
+            (b",", b"1/3  col 2"),
+            (b";", b"1/3  col 4"),
+            ("T中".encode(), b"1/3  col 3"),
+            ("t中".encode(), b"1/3  col 3"),
+            ("2t中".encode(), b"1/3  col 5"),
+            ("dT中".encode(), b"empty operator motion"),
+            ("0dt中".encode(), "中b中c中".encode()),
+            (b"u", "a中b中c中".encode()),
+            ('0"a2df中'.encode(), b"1/3  col 1"),
+            (b"j0.", b"2/3  col 1"),
+            (b"u", "a中b中c中".encode()),
+            ("0ct中".encode(), b"[INSERT]"),
+            (b"X\x1b", b"[VIEW]"),
+            (b"G0f\t", b"3/3  col 2"),
+            (b"0df\x1b", b"3/3  col 1"),
+            (b"f\x16", b"3/3  col 1"),
+            (b"\x1b", b"character not found"),
+        ]:
+            os.write(master, keys)
+            receive(master, marker)
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_text() == "c中\nX中b中c中\na\tb\n", path.read_text()
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    character_find_session(Path(directory))
     newline_replace_undo_session(Path(directory))
     cross_line_undo_session(Path(directory))
     line_replacement_undo_session(Path(directory))
