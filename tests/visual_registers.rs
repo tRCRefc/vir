@@ -5,6 +5,47 @@ use vir::{
 };
 
 #[test]
+fn autoindent_does_not_rewrite_multiline_register_put_or_dot() {
+    for before in [false, true] {
+        for count in [1, 2] {
+            let mut enabled =
+                Editor::from_buffer(TextBuffer::from_text("  base\n\tother\n").unwrap());
+            enabled
+                .set_named_register('a', Register::Characters("中\n x\n\ty".into()), false)
+                .unwrap();
+            let mut disabled = enabled.clone();
+            enabled.set_autoindent(true);
+            let mut actual = VisualState::default();
+            actual.column = 2;
+            let mut reference = actual.clone();
+            actual
+                .put_selected(&mut enabled, before, count, Some('a'))
+                .unwrap();
+            reference
+                .put_selected(&mut disabled, before, count, Some('a'))
+                .unwrap();
+            assert_eq!(enabled.buffer(), disabled.buffer());
+            assert_eq!(
+                (actual.row, actual.column),
+                (reference.row, reference.column)
+            );
+            actual.undo(&mut enabled).unwrap();
+            reference.undo(&mut disabled).unwrap();
+            assert_eq!(enabled.buffer().to_text(), "  base\n\tother\n");
+            actual.row = 1;
+            actual.column = 1;
+            reference.row = 1;
+            reference.column = 1;
+            actual.repeat_change(&mut enabled, None).unwrap();
+            reference.repeat_change(&mut disabled, None).unwrap();
+            assert_eq!(enabled.buffer(), disabled.buffer());
+            assert_eq!(enabled.named_register('a'), disabled.named_register('a'));
+            assert!(enabled.autoindent());
+        }
+    }
+}
+
+#[test]
 fn yank_preserves_text_modified_cursor_and_existing_undo() {
     let mut editor = Editor::default();
     editor.insert_lines(0, ["a中🙂z", "next"]).unwrap();

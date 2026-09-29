@@ -422,7 +422,7 @@ impl VisualState {
                 if repeated.contains('\n') {
                     edit.record_line_replacement(self.row, self.row);
                 }
-                edit.insert(&repeated)?;
+                edit.insert_literal(&repeated)?;
                 self.finish_insert(edit.commit()?);
             }
             Register::Lines(lines) => {

@@ -285,14 +285,21 @@ impl TextEdit<'_> {
     pub fn insert(&mut self, text: &str) -> Result<(), String> {
         let original = text.to_owned();
         let text = self.autoindent_text(text);
-        self.cursor = self
-            .draft
-            .replace_text(self.cursor, self.cursor, &text)
-            .map_err(str::to_owned)?;
-        self.crossed_lines |= text.contains('\n');
+        self.insert_literal(&text)?;
         if !text.is_empty() && self.input_actions.is_some() {
             self.record(InputAction::Insert(original));
         }
+        Ok(())
+    }
+
+    /// Insert stored text without interpreting it as newly typed input.
+    /// Register puts have their own replay record and must preserve every byte.
+    pub(crate) fn insert_literal(&mut self, text: &str) -> Result<(), String> {
+        self.cursor = self
+            .draft
+            .replace_text(self.cursor, self.cursor, text)
+            .map_err(str::to_owned)?;
+        self.crossed_lines |= text.contains('\n');
         Ok(())
     }
 
