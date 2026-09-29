@@ -377,7 +377,15 @@ impl VisualState {
             .numbered_register(number)
             .ok_or("register is empty")?
             .clone();
-        self.put_register(editor, before, count, &register)
+        self.put_register(editor, before, count, &register)?;
+        if (1..=9).contains(&number) {
+            self.last_change = Some(ChangeRecord::PutNamed {
+                before,
+                count,
+                register: char::from_digit(number as u32, 10).unwrap(),
+            });
+        }
+        Ok(())
     }
 
     fn put_register(
