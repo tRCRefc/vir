@@ -252,8 +252,10 @@ as caret notation; zero-width characters show a replacement glyph.
 Movement uses Unicode scalars, not grapheme clusters; complex emoji and
 combining sequences are not fully supported. The last terminal column is
 reserved to avoid autowrap. Browsing and searching never change text;
-:w/:wq write files. Multiline :a/:i/:c, general counts and autoindent
-are not implemented. Terminal I/O errors retain the
+:w/:wq write files. Multiline :a/:i/:c and general ex counts are not
+implemented. Visual input supports ai/noai autoindent for keyboard
+newlines, o/O, whole-line change, and R; bracketed paste remains literal.
+Terminal I/O errors retain the
 current Insert draft in memory before returning. Recovery snapshots are
 maintained separately; the original file is written only by save commands.
 
