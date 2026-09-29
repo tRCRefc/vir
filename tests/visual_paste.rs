@@ -1,6 +1,7 @@
 use vir::{
     buffer::TextBuffer,
-    editor::Editor,
+    editor::{Editor, InputAction},
+    ex::{command::execute, parser::parse},
     visual::{InputStart, Motion, VisualState, paste_input},
 };
 
@@ -180,4 +181,96 @@ fn maximum_replace_paste_is_repeatable_with_byte_accounting() {
     assert_eq!(editor, before);
     state.repeat_change(&mut editor, Some(1)).unwrap();
     assert_eq!(editor.buffer().line(0).unwrap().len(), 131_071);
+}
+
+#[test]
+fn autoindent_never_rewrites_paste_in_normal_input_or_counted_input() {
+    for enabled in [false, true] {
+        for entry in ['n', 'i', 'a', 'R'] {
+            for count in [1, 3] {
+                let mut editor = editor("  base\n  tail\n");
+                if enabled {
+                    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+                }
+                let mut state = VisualState::default();
+                state.column = 2;
+                let payload = "字\r\n\tX\nY";
+                if entry == 'n' {
+                    state.paste(&mut editor, payload).unwrap();
+                } else {
+                    let mut session = state
+                        .begin_counted_insert(&mut editor, entry, count)
+                        .unwrap();
+                    session.paste(payload).unwrap();
+                    session.commit(&mut state).unwrap();
+                }
+                let expected = match entry {
+                    'n' => "  b字\n\tX\nYase\n  tail\n".to_owned(),
+                    'a' => format!("  b{}\n\tX\nYase\n  tail\n", "字".repeat(count)),
+                    'R' => format!("  {}\n\tX\nY\n  tail\n", "字".repeat(count)),
+                    _ => format!("  {}\n\tX\nYbase\n  tail\n", "字".repeat(count)),
+                };
+                assert_eq!(
+                    editor.buffer().to_text(),
+                    expected,
+                    "{entry}/{count}/{enabled}"
+                );
+                editor.undo().unwrap();
+                assert_eq!(editor.buffer().to_text(), "  base\n  tail\n");
+                // Replay must stay literal even when ai changed after the paste.
+                execute(
+                    parse(if enabled { "set noai" } else { "set ai" }).unwrap(),
+                    &mut editor,
+                )
+                .unwrap();
+                state.row = 0;
+                state.column = 2;
+                state.repeat_change(&mut editor, None).unwrap();
+                assert_eq!(editor.buffer().to_text(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_typed_and_pasted_newlines_keep_their_meaning_on_dot() {
+    for count in [1, 3] {
+        let mut editor = editor("  base");
+        execute(parse("set ai").unwrap(), &mut editor).unwrap();
+        let mut state = VisualState::default();
+        let mut session = state.begin_counted_insert(&mut editor, 'A', count).unwrap();
+        session.paste("X").unwrap();
+        session.apply_input(&InputAction::Backspace).unwrap();
+        session
+            .apply_input(&InputAction::Insert("T\nU".into()))
+            .unwrap();
+        session.paste("\n\tV").unwrap();
+        session.commit(&mut state).unwrap();
+        let expected = format!("  base{}\n  U\n\tV", "T".repeat(count));
+        assert_eq!(editor.buffer().to_text(), expected);
+        editor.undo().unwrap();
+        state.row = 0;
+        state.column = 0;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(editor.buffer().to_text(), expected);
+    }
+}
+
+#[test]
+fn direct_input_paste_remains_literal_in_replay_and_checks_expansion_budget() {
+    let mut editor = editor("  base");
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = VisualState::default();
+    let mut edit = state.begin_insert(&mut editor, 'A').unwrap();
+    paste_input(&mut edit, false, "\nchild").unwrap();
+    state.commit_input(edit, InputStart::Insert('A')).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  base\nchild");
+    editor.undo().unwrap();
+    state.row = 0;
+    state.column = 0;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  base\nchild");
+    let before = editor.clone();
+    assert!(state.repeat_change(&mut editor, Some(1_000_000)).is_err());
+    assert_eq!(editor, before);
 }

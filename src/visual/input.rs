@@ -19,7 +19,9 @@ fn check_action_count(count: usize) -> Result<(), String> {
 
 pub(super) fn action_work(action: &InputAction) -> usize {
     match action {
-        InputAction::Insert(text) | InputAction::ReplaceText(text) => text.len().max(1),
+        InputAction::Insert(text)
+        | InputAction::InsertLiteral(text)
+        | InputAction::ReplaceText(text) => text.len().max(1),
         InputAction::Replace(c) => c.len_utf8(),
         InputAction::Backspace | InputAction::RestoreReplacement => 0,
         _ => 1,
@@ -161,7 +163,7 @@ impl<'a> InputSession<'a> {
         if matches!(action, InputAction::ReplaceText(text) if text.contains('\r')) {
             return Err("carriage returns are not supported".into());
         }
-        if matches!(action, InputAction::Insert(text) | InputAction::ReplaceText(text) if text.is_empty())
+        if matches!(action, InputAction::Insert(text) | InputAction::InsertLiteral(text) | InputAction::ReplaceText(text) if text.is_empty())
         {
             return Ok(());
         }
@@ -191,7 +193,9 @@ impl<'a> InputSession<'a> {
         // well as its expansion cost, so reaching the limit never traps Backspace.
         let erase_insert = if self.remaining > 1 {
             match self.actions.last() {
-                Some(InputAction::Insert(text)) if matches!(action, InputAction::Backspace) => {
+                Some(InputAction::Insert(text) | InputAction::InsertLiteral(text))
+                    if matches!(action, InputAction::Backspace) =>
+                {
                     text.chars().last().map(char::len_utf8)
                 }
                 Some(InputAction::ReplaceText(text))
@@ -216,6 +220,10 @@ impl<'a> InputSession<'a> {
                 (self.actions.last(), action),
                 (Some(InputAction::Insert(_)), InputAction::Insert(_))
                     | (
+                        Some(InputAction::InsertLiteral(_)),
+                        InputAction::InsertLiteral(_)
+                    )
+                    | (
                         Some(InputAction::ReplaceText(_)),
                         InputAction::ReplaceText(_)
                     )
@@ -226,15 +234,19 @@ impl<'a> InputSession<'a> {
         }
         if self.remaining > 1 {
             match action {
-                InputAction::Insert(text) => {
+                InputAction::Insert(text) | InputAction::InsertLiteral(text) => {
                     if let Some((head, tail)) = text.split_once('\n') {
                         let unit = format!("{}{head}", self.prefix);
                         let expanded = format!("{head}{}\n{tail}", unit.repeat(self.remaining - 1));
-                        self.edit.insert(&expanded)?;
+                        if matches!(action, InputAction::InsertLiteral(_)) {
+                            self.edit.insert(&expanded)?;
+                        } else {
+                            self.edit.insert_input(&expanded)?;
+                        }
                         self.prefix.clear();
                         self.remaining = 1;
                     } else {
-                        self.edit.insert(text)?;
+                        self.edit.apply_input(action)?;
                         self.prefix.push_str(text);
                     }
                 }
@@ -280,8 +292,11 @@ impl<'a> InputSession<'a> {
     /// Keep the replay recipe normalized without mixing it into text editing.
     fn record_action(&mut self, action: &InputAction, erased_insert: bool) {
         if erased_insert {
-            if let Some(InputAction::Insert(previous) | InputAction::ReplaceText(previous)) =
-                self.actions.last_mut()
+            if let Some(
+                InputAction::Insert(previous)
+                | InputAction::InsertLiteral(previous)
+                | InputAction::ReplaceText(previous),
+            ) = self.actions.last_mut()
             {
                 previous.pop();
                 if previous.is_empty() {
@@ -292,6 +307,7 @@ impl<'a> InputSession<'a> {
         }
         match (self.actions.last_mut(), action) {
             (Some(InputAction::Insert(previous)), InputAction::Insert(text))
+            | (Some(InputAction::InsertLiteral(previous)), InputAction::InsertLiteral(text))
             | (Some(InputAction::ReplaceText(previous)), InputAction::ReplaceText(text)) => {
                 previous.push_str(text)
             }
@@ -304,7 +320,7 @@ impl<'a> InputSession<'a> {
         let action = if self.mode() == 'R' {
             InputAction::ReplaceText(text)
         } else {
-            InputAction::Insert(text)
+            InputAction::InsertLiteral(text)
         };
         self.apply_input(&action)
     }

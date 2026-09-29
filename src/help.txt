@@ -265,6 +265,7 @@ Bracketed paste (--vi, when supported by the terminal):
   actual Backspace restores overwritten characters, including pasted input.
 - Text is literal, including Esc/control bytes. CRLF and CR become LF. A Paste
   event is limited to 64 KiB; larger events are rejected without partial edits.
+  Autoindent does not add whitespace to pasted newlines, including on dot replay.
 - Pending counts/operators/r are cancelled and the paste is rejected. In : / ?
   input, only one line without control keys (except Tab) is accepted; Enter is
   still required. Pasted newlines never submit a command.

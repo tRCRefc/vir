@@ -60,7 +60,9 @@ impl InputStart {
         let mut text = String::new();
         for action in actions {
             match action {
-                InputAction::Insert(input) if !replace && !input.contains('\n') => {
+                InputAction::Insert(input) | InputAction::InsertLiteral(input)
+                    if !replace && !input.contains('\n') =>
+                {
                     text.push_str(input)
                 }
                 InputAction::ReplaceText(input) if replace && !input.contains('\n') => {

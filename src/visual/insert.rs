@@ -214,7 +214,7 @@ impl VisualState {
             },
         )?;
         if replacement == '\n' {
-            edit.insert("\n")?;
+            edit.insert_input("\n")?;
         } else {
             edit.insert(&replacement.to_string().repeat(count))?;
         }

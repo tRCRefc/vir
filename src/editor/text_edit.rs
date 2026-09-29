@@ -6,6 +6,8 @@ use crate::buffer::{Position, TextBuffer};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputAction {
     Insert(String),
+    /// Stored or pasted text; replay must not generate indentation.
+    InsertLiteral(String),
     Backspace,
     Delete,
     Replace(char),
@@ -74,19 +76,20 @@ impl TextEdit<'_> {
 
     fn record(&mut self, action: InputAction) {
         if let Some(actions) = &mut self.input_actions {
-            if let (Some(InputAction::Insert(previous)), InputAction::Insert(text)) =
-                (actions.last_mut(), &action)
-            {
-                previous.push_str(text);
-            } else {
-                actions.push(action);
+            match (actions.last_mut(), &action) {
+                (Some(InputAction::Insert(previous)), InputAction::Insert(text))
+                | (Some(InputAction::InsertLiteral(previous)), InputAction::InsertLiteral(text)) => {
+                    previous.push_str(text);
+                }
+                _ => actions.push(action),
             }
         }
     }
 
     pub fn apply_input(&mut self, action: &InputAction) -> Result<(), String> {
         match action {
-            InputAction::Insert(text) => self.insert(text),
+            InputAction::Insert(text) => self.insert_input(text),
+            InputAction::InsertLiteral(text) => self.insert(text),
             InputAction::Backspace => self.backspace(),
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
@@ -282,7 +285,16 @@ impl TextEdit<'_> {
         Ok(())
     }
 
+    /// Insert literal text, retaining its literal meaning in an input recipe.
     pub fn insert(&mut self, text: &str) -> Result<(), String> {
+        self.insert_literal(text)?;
+        if !text.is_empty() && self.input_actions.is_some() {
+            self.record(InputAction::InsertLiteral(text.to_owned()));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn insert_input(&mut self, text: &str) -> Result<(), String> {
         let original = text.to_owned();
         let text = self.autoindent_text(text);
         self.insert_literal(&text)?;
