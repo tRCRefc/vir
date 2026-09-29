@@ -50,6 +50,18 @@ fn generated_indent_is_removed_when_open_input_is_empty() {
 }
 
 #[test]
+fn open_line_above_uses_original_line_indentation() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("  base\n    next\n").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    state.row = 1;
+    let input = state.begin_counted_insert(&mut editor, 'O', 1).unwrap();
+    assert_eq!(input.buffer().to_text(), "  base\n    \n    next\n");
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  base\n\n    next\n");
+}
+
+#[test]
 fn low_level_text_insertion_is_literal_even_with_autoindent() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("  base").unwrap());
     execute(parse("set ai").unwrap(), &mut editor).unwrap();
