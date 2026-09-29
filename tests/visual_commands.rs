@@ -94,6 +94,28 @@ fn errors_and_unsupported_multiline_commands_preserve_both_states() {
 }
 
 #[test]
+fn visual_set_autoindent_changes_following_input_sessions() {
+    let (mut editor, mut state) = session("  base");
+    state.execute_ex("set ai", &mut editor).unwrap();
+    let mut input = state.begin_counted_insert(&mut editor, 'A', 1).unwrap();
+    input
+        .apply_input(&vir::editor::InputAction::Insert("X\nY".into()))
+        .unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  baseX\n  Y");
+    state.execute_ex("set noai", &mut editor).unwrap();
+    editor.undo().unwrap();
+    state.row = 0;
+    state.column = 6;
+    let mut input = state.begin_counted_insert(&mut editor, 'A', 1).unwrap();
+    input
+        .apply_input(&vir::editor::InputAction::Insert("X\nY".into()))
+        .unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  baseX\nY");
+}
+
+#[test]
 fn file_commands_preserve_failures_and_sync_loads_names_and_saves() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("中文 file");
