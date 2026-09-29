@@ -21,7 +21,8 @@ pub(super) fn action_work(action: &InputAction) -> usize {
     match action {
         InputAction::Insert(text)
         | InputAction::InsertLiteral(text)
-        | InputAction::ReplaceText(text) => text.len().max(1),
+        | InputAction::ReplaceText(text)
+        | InputAction::ReplaceTyped(text) => text.len().max(1),
         InputAction::Replace(c) => c.len_utf8(),
         InputAction::Backspace | InputAction::RestoreReplacement => 0,
         _ => 1,
@@ -158,12 +159,19 @@ impl<'a> InputSession<'a> {
             if c.is_control() && *c != '\n' && *c != '\t' {
                 return Err("unsupported replacement character".into());
             }
-            return self.apply_input(&InputAction::ReplaceText(c.to_string()));
+            let typed = InputAction::ReplaceTyped(c.to_string());
+            self.apply_input(&typed)?;
+            if let Some(last) = self.actions.last_mut()
+                && matches!(last, InputAction::ReplaceTyped(_))
+            {
+                *last = InputAction::Replace(*c);
+            }
+            return Ok(());
         }
         if matches!(action, InputAction::ReplaceText(text) if text.contains('\r')) {
             return Err("carriage returns are not supported".into());
         }
-        if matches!(action, InputAction::Insert(text) | InputAction::InsertLiteral(text) | InputAction::ReplaceText(text) if text.is_empty())
+        if matches!(action, InputAction::Insert(text) | InputAction::InsertLiteral(text) | InputAction::ReplaceText(text) | InputAction::ReplaceTyped(text) if text.is_empty())
         {
             return Ok(());
         }
@@ -198,10 +206,15 @@ impl<'a> InputSession<'a> {
                 {
                     text.chars().last().map(char::len_utf8)
                 }
-                Some(InputAction::ReplaceText(text))
+                Some(InputAction::ReplaceText(text) | InputAction::ReplaceTyped(text))
                     if matches!(action, InputAction::RestoreReplacement) =>
                 {
                     text.chars().last().map(char::len_utf8)
+                }
+                Some(InputAction::Replace(c))
+                    if matches!(action, InputAction::RestoreReplacement) =>
+                {
+                    Some(c.len_utf8())
                 }
                 _ => None,
             }
@@ -250,17 +263,29 @@ impl<'a> InputSession<'a> {
                         self.prefix.push_str(text);
                     }
                 }
-                InputAction::ReplaceText(text) => {
+                InputAction::ReplaceText(text) | InputAction::ReplaceTyped(text) => {
                     if let Some((head, tail)) = text.split_once('\n') {
                         let unit = format!("{}{head}", self.prefix);
-                        self.edit.replace_input_text(head)?;
+                        if matches!(action, InputAction::ReplaceTyped(_)) {
+                            self.edit.replace_typed_text(head)?;
+                        } else {
+                            self.edit.replace_input_text(head)?;
+                        }
                         self.edit
                             .insert_replace_copies(&unit.repeat(self.remaining - 1))?;
-                        self.edit.replace_input_text(&format!("\n{tail}"))?;
+                        if matches!(action, InputAction::ReplaceTyped(_)) {
+                            self.edit.replace_typed_text(&format!("\n{tail}"))?;
+                        } else {
+                            self.edit.replace_input_text(&format!("\n{tail}"))?;
+                        }
                         self.prefix.clear();
                         self.remaining = 1;
                     } else {
-                        self.edit.replace_input_text(text)?;
+                        if matches!(action, InputAction::ReplaceTyped(_)) {
+                            self.edit.replace_typed_text(text)?;
+                        } else {
+                            self.edit.replace_input_text(text)?;
+                        }
                         self.prefix.push_str(text);
                     }
                 }
@@ -292,10 +317,15 @@ impl<'a> InputSession<'a> {
     /// Keep the replay recipe normalized without mixing it into text editing.
     fn record_action(&mut self, action: &InputAction, erased_insert: bool) {
         if erased_insert {
+            if matches!(self.actions.last(), Some(InputAction::Replace(_))) {
+                self.actions.pop();
+                return;
+            }
             if let Some(
                 InputAction::Insert(previous)
                 | InputAction::InsertLiteral(previous)
-                | InputAction::ReplaceText(previous),
+                | InputAction::ReplaceText(previous)
+                | InputAction::ReplaceTyped(previous),
             ) = self.actions.last_mut()
             {
                 previous.pop();

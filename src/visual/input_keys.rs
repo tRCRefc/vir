@@ -30,7 +30,7 @@ impl InputKeys {
             // Consume the quoted key even if the transaction rejects its cost.
             self.quoted = false;
             let action = if replace {
-                InputAction::ReplaceText(c.to_string())
+                InputAction::ReplaceTyped(c.to_string())
             } else {
                 InputAction::Insert(c.to_string())
             };

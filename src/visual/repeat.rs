@@ -65,7 +65,9 @@ impl InputStart {
                 {
                     text.push_str(input)
                 }
-                InputAction::ReplaceText(input) if replace && !input.contains('\n') => {
+                InputAction::ReplaceText(input) | InputAction::ReplaceTyped(input)
+                    if replace && !input.contains('\n') =>
+                {
                     text.push_str(input)
                 }
                 InputAction::Replace(c) if replace && *c != '\n' => text.push(*c),
@@ -73,7 +75,9 @@ impl InputStart {
                     text.pop()?;
                 }
                 InputAction::RestoreReplacement if replace => {
-                    text.pop()?;
+                    if text.pop().is_none() {
+                        return Some(String::new());
+                    }
                 }
                 _ => return None,
             }

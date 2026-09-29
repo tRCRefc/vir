@@ -12,8 +12,21 @@ pub enum InputAction {
     Delete,
     Replace(char),
     ReplaceText(String),
+    /// Keyboard replacement, including quoted LF, with input indentation.
+    ReplaceTyped(String),
     RestoreReplacement,
 }
+
+#[derive(Clone, Copy)]
+struct GeneratedIndent {
+    row: usize,
+    width: usize,
+    columns: usize,
+    literal: bool,
+}
+
+// Generated text has a separate bound even for otherwise unlimited live typing.
+const MAX_GENERATED_INDENT: usize = 1_000_000;
 
 pub struct TextEdit<'a> {
     editor: &'a mut Editor,
@@ -29,6 +42,9 @@ pub struct TextEdit<'a> {
     pending_named_register: Option<(char, super::Register, bool)>,
     replacements: Vec<(Position, Position, String, bool)>,
     input_actions: Option<Vec<InputAction>>,
+    indent: Option<GeneratedIndent>,
+    indent_work: usize,
+    indent_budget: usize,
 }
 
 impl Editor {
@@ -50,6 +66,9 @@ impl Editor {
             pending_register: None,
             pending_named_register: None,
             input_actions: None,
+            indent: None,
+            indent_work: 0,
+            indent_budget: MAX_GENERATED_INDENT,
         })
     }
 }
@@ -94,6 +113,7 @@ impl TextEdit<'_> {
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
             InputAction::ReplaceText(text) => self.replace_input_text(text),
+            InputAction::ReplaceTyped(text) => self.replace_typed_text(text),
             InputAction::RestoreReplacement => self.replace_backspace(),
         }
     }
@@ -103,15 +123,25 @@ impl TextEdit<'_> {
         if character.is_control() && character != '\n' && character != '\t' {
             return Err("unsupported replacement character".into());
         }
-        self.apply_replace_text(&character.to_string(), true)?;
+        self.apply_typed_text(&character.to_string(), true)?;
         self.record(InputAction::Replace(character));
+        Ok(())
+    }
+
+    pub(crate) fn replace_typed_text(&mut self, text: &str) -> Result<(), String> {
+        self.apply_typed_text(text, true)?;
+        if !text.is_empty() {
+            self.record(InputAction::ReplaceTyped(text.to_owned()));
+        }
         Ok(())
     }
 
     /// Replace literal text in one buffer operation, retaining per-scalar R
     /// backspace history. LF splits the current line; it never consumes a file LF.
     pub fn replace_input_text(&mut self, text: &str) -> Result<(), String> {
-        self.write_replace_text(text, true)
+        self.write_replace_text(text, true)?;
+        self.note_literal(text);
+        Ok(())
     }
 
     /// Insert generated R copies while retaining reversible per-scalar history.
@@ -192,6 +222,9 @@ impl TextEdit<'_> {
 
     /// Reverse the most recent Replace keystroke, stopping at session entry.
     pub fn replace_backspace(&mut self) -> Result<(), String> {
+        if self.at_generated_indent() {
+            return Ok(());
+        }
         if let Some((start, end, old, was_empty)) = self.replacements.last() {
             self.draft
                 .replace_text(*start, *end, old)
@@ -254,6 +287,7 @@ impl TextEdit<'_> {
     }
 
     pub fn open_line_below(&mut self) -> Result<(), String> {
+        let indent = self.current_indent_width();
         let row = if self.draft.is_empty() {
             0
         } else {
@@ -266,10 +300,12 @@ impl TextEdit<'_> {
         }
         self.crossed_lines = true;
         self.cursor = Position { row, column: 0 };
+        self.seed_autoindent(indent)?;
         Ok(())
     }
 
     pub fn open_line_above(&mut self) -> Result<(), String> {
+        let indent = self.current_indent_width();
         let row = if self.draft.is_empty() {
             0
         } else {
@@ -282,12 +318,14 @@ impl TextEdit<'_> {
         }
         self.crossed_lines = true;
         self.cursor = Position { row, column: 0 };
+        self.seed_autoindent(indent)?;
         Ok(())
     }
 
     /// Insert literal text, retaining its literal meaning in an input recipe.
     pub fn insert(&mut self, text: &str) -> Result<(), String> {
         self.insert_literal(text)?;
+        self.note_literal(text);
         if !text.is_empty() && self.input_actions.is_some() {
             self.record(InputAction::InsertLiteral(text.to_owned()));
         }
@@ -295,11 +333,9 @@ impl TextEdit<'_> {
     }
 
     pub(crate) fn insert_input(&mut self, text: &str) -> Result<(), String> {
-        let original = text.to_owned();
-        let text = self.autoindent_text(text);
-        self.insert_literal(&text)?;
-        if !text.is_empty() && self.input_actions.is_some() {
-            self.record(InputAction::Insert(original));
+        self.apply_typed_text(text, false)?;
+        if !text.is_empty() {
+            self.record(InputAction::Insert(text.to_owned()));
         }
         Ok(())
     }
@@ -315,29 +351,193 @@ impl TextEdit<'_> {
         Ok(())
     }
 
-    fn autoindent_text(&self, text: &str) -> String {
+    pub(crate) fn current_indent_width(&self) -> usize {
+        indent_width(self.draft.line(self.cursor.row).unwrap_or(""))
+    }
+
+    fn generated_text(&mut self, width: usize) -> Result<String, String> {
+        let bytes = width / 8 + width % 8;
+        let work = self
+            .indent_work
+            .checked_add(bytes)
+            .ok_or("input repeat too large")?;
+        if work > self.indent_budget {
+            return Err("input repeat too large".into());
+        }
+        self.indent_work = work;
+        Ok(format!(
+            "{}{}",
+            "\t".repeat(width / 8),
+            " ".repeat(width % 8)
+        ))
+    }
+
+    pub(crate) fn seed_autoindent(&mut self, width: usize) -> Result<(), String> {
+        if !self.editor.autoindent || width == 0 {
+            return Ok(());
+        }
+        let text = self.generated_text(width)?;
+        self.insert_literal(&text)?;
+        self.indent = Some(GeneratedIndent {
+            row: self.cursor.row,
+            width,
+            columns: text.len(),
+            literal: false,
+        });
+        Ok(())
+    }
+
+    fn note_literal(&mut self, text: &str) {
+        if text.contains('\n') {
+            self.indent = None;
+        } else if !text.is_empty()
+            && let Some(indent) = &mut self.indent
+        {
+            // Literal whitespace must not be normalized or discarded on Esc.
+            indent.literal = true;
+        }
+    }
+
+    pub(crate) fn at_generated_indent(&self) -> bool {
+        self.indent.is_some_and(|indent| {
+            indent.row == self.cursor.row
+                && indent.columns > 0
+                && self.cursor.column <= indent.columns
+        })
+    }
+
+    /// Complete the generated line as vappend/fixindent do before publication.
+    /// Only the newly entered prefix is normalized, never the original tail.
+    pub(crate) fn finish_autoindent(&mut self) -> Result<Option<usize>, String> {
+        let Some(indent) = self.indent.take() else {
+            return Ok(None);
+        };
+        if indent.row != self.cursor.row || indent.literal {
+            return Ok(None);
+        }
+        let line = self.draft.line(self.cursor.row).unwrap_or("");
+        let prefix: String = line.chars().take(self.cursor.column).collect();
+        let rest = prefix.trim_start_matches([' ', '\t']);
+        let width = indent_width(&prefix);
+        let cleared = rest.is_empty() && width == indent.width && prefix.len() == line.len();
+        let normalized = if cleared {
+            String::new()
+        } else {
+            format!("{}{}{rest}", "\t".repeat(width / 8), " ".repeat(width % 8))
+        };
+        if normalized != prefix {
+            self.cursor = self
+                .draft
+                .replace_text(
+                    Position {
+                        row: self.cursor.row,
+                        column: 0,
+                    },
+                    self.cursor,
+                    &normalized,
+                )
+                .map_err(str::to_owned)?;
+            // History positions preceding normalization no longer address the
+            // same columns; subsequent R input begins on a fresh line.
+            self.replacements.clear();
+        }
+        Ok(Some(width))
+    }
+
+    fn apply_typed_text(&mut self, text: &str, replace: bool) -> Result<(), String> {
+        if text.contains('\r') {
+            return Err("carriage returns are not supported".into());
+        }
         if !self.editor.autoindent || !text.contains('\n') {
-            return text.to_owned();
+            return if replace {
+                self.apply_replace_text(text, true)
+            } else {
+                self.insert_literal(text)
+            };
         }
-        let indent: String = self
-            .draft
-            .line(self.cursor.row)
-            .unwrap_or("")
-            .chars()
-            .take_while(|c| matches!(c, ' ' | '\t'))
-            .collect();
-        let mut expanded = String::with_capacity(text.len() + indent.len());
-        for (index, part) in text.split('\n').enumerate() {
-            if index != 0 {
-                expanded.push('\n');
-                expanded.push_str(&indent);
+        // A rejected expansion must leave the entire key/action untouched.
+        let saved = (
+            self.draft.clone(),
+            self.cursor,
+            self.crossed_lines,
+            self.replacements.clone(),
+            self.indent,
+            self.indent_work,
+        );
+        let result = self.apply_indented_text(text, replace);
+        if result.is_err() {
+            (
+                self.draft,
+                self.cursor,
+                self.crossed_lines,
+                self.replacements,
+                self.indent,
+                self.indent_work,
+            ) = saved;
+        }
+        result
+    }
+
+    fn apply_indented_text(&mut self, text: &str, replace: bool) -> Result<(), String> {
+        let mut parts = text.split('\n').peekable();
+        while let Some(part) = parts.next() {
+            if replace {
+                self.apply_replace_text(part, true)?;
+            } else {
+                self.insert_literal(part)?;
             }
-            expanded.push_str(part);
+            if parts.peek().is_none() {
+                break;
+            }
+            let width = self.finish_autoindent()?.unwrap_or_else(|| {
+                let prefix: String = self
+                    .draft
+                    .line(self.cursor.row)
+                    .unwrap_or("")
+                    .chars()
+                    .take(self.cursor.column)
+                    .collect();
+                indent_width(&prefix)
+            });
+            let start = self.cursor;
+            let tail: String = self
+                .draft
+                .line(start.row)
+                .unwrap_or("")
+                .chars()
+                .skip(start.column)
+                .take_while(|c| matches!(c, ' ' | '\t'))
+                .collect();
+            let generated = self.generated_text(width)?;
+            self.cursor = self
+                .draft
+                .replace_text(
+                    start,
+                    Position {
+                        column: start.column + tail.chars().count(),
+                        ..start
+                    },
+                    &format!("\n{generated}"),
+                )
+                .map_err(str::to_owned)?;
+            self.crossed_lines = true;
+            if replace {
+                self.replacements.push((start, self.cursor, tail, false));
+            }
+            self.indent = Some(GeneratedIndent {
+                row: self.cursor.row,
+                width,
+                columns: generated.len(),
+                literal: false,
+            });
         }
-        expanded
+        Ok(())
     }
 
     pub fn backspace(&mut self) -> Result<(), String> {
+        if self.at_generated_indent() {
+            return Ok(());
+        }
         let start = if self.cursor.column > 0 {
             Position {
                 column: self.cursor.column - 1,
@@ -535,7 +735,12 @@ impl TextEdit<'_> {
         self.commit_inner(true, true)
     }
 
-    fn commit_inner(self, publish_unchanged: bool, line_restore: bool) -> Result<Position, String> {
+    fn commit_inner(
+        mut self,
+        publish_unchanged: bool,
+        line_restore: bool,
+    ) -> Result<Position, String> {
+        self.finish_autoindent()?;
         if publish_unchanged || self.draft != self.editor.buffer {
             let row = self.cursor.row;
             let location = self.undo_location();
@@ -561,4 +766,16 @@ impl TextEdit<'_> {
         }
         Ok(self.cursor)
     }
+}
+
+fn indent_width(text: &str) -> usize {
+    text.chars()
+        .take_while(|c| matches!(c, ' ' | '\t'))
+        .fold(0, |width, c| {
+            if c == '\t' {
+                (width / 8 + 1) * 8
+            } else {
+                width + 1
+            }
+        })
 }

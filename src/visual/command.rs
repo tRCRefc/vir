@@ -24,8 +24,12 @@ impl VisualState {
                 | Command::Delete
                 | Command::Undo
                 | Command::Substitute
+                | Command::SetAutoIndent(_)
         ) {
-            return Err("visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :u and :s".into());
+            return Err(
+                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :u, :s and :set ai/noai"
+                    .into(),
+            );
         }
         let mut result = execute(parsed, editor)?;
         if matches!(
