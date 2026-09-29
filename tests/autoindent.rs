@@ -82,6 +82,20 @@ fn whole_line_change_keeps_the_deleted_line_indent() {
 }
 
 #[test]
+fn replace_newline_reindents_forwarded_tail() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("  ab   tail").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    state.column = 2;
+    let mut input = state.begin_counted_insert(&mut editor, 'R', 1).unwrap();
+    input
+        .apply_input(&InputAction::Replace("\n".chars().next().unwrap()))
+        .unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  \n  b   tail");
+}
+
+#[test]
 fn low_level_text_insertion_is_literal_even_with_autoindent() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("  base").unwrap());
     execute(parse("set ai").unwrap(), &mut editor).unwrap();

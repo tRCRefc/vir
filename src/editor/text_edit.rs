@@ -505,16 +505,17 @@ impl TextEdit<'_> {
                 .line(start.row)
                 .unwrap_or("")
                 .chars()
-                .skip(start.column)
+                .skip(start.column + usize::from(replace))
                 .take_while(|c| matches!(c, ' ' | '\t'))
                 .collect();
+            let consumed = usize::from(replace) + tail.chars().count();
             let generated = self.generated_text(width)?;
             self.cursor = self
                 .draft
                 .replace_text(
                     start,
                     Position {
-                        column: start.column + tail.chars().count(),
+                        column: start.column + consumed,
                         ..start
                     },
                     &format!("\n{generated}"),
