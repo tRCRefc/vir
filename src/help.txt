@@ -76,9 +76,11 @@ Ctrl-B/Ctrl-F. In normal mode, q or Ctrl-C checks for unsaved changes
 before exiting. i inserts before the cursor, a after it, o opens a line
 below. A appends at line end, I inserts before the first nonblank (space/
 Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
-2d3d (six lines). D deletes from the cursor to the end of the line; C
-does the same and immediately enters Insert, with deletion and typed text
-committed as one undo. Esc/Ctrl-C cancels a pending count/operator. Counts
+2d3d (six lines). D deletes to the current line end and ignores counts,
+including a count on dot. C enters Insert after deleting through the end
+of the counted last line (like c$); on an empty line its count repeats the
+first input segment instead. Deletion and input commit as one undo.
+Esc/Ctrl-C cancels a pending count/operator. Counts
 for unsupported editing commands are rejected.
 Delete motions: dh/dl remove characters left/right; d0 deletes up to the
 cursor, d$ through line end. dj/dk delete both current and destination
@@ -180,7 +182,9 @@ only to reserve screen space on old terminals, not to repeat text.
 [INSERT] marks text input: Enter splits a line, Tab inserts a tab,
 Backspace/Delete remove characters and can join lines. Esc or Ctrl-C
 commits the whole input session and returns to normal mode. Arrow keys
-are ignored during Insert. Normal x deletes a character; u (or :u)
+are ignored during Insert. Normal [count]x deletes characters on the current
+line, clamping at its end. x/D/C accept a named register prefix. Empty x/D
+report an error without changing text or history. u (or :u)
 undoes/restores the last edit, including a whole Insert session.
 Normal u returns to the edit start for single-line character transactions.
 For whole-line d, line-register p/P and o/O that only add new lines,

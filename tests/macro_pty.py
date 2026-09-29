@@ -27,6 +27,8 @@ def case(directory, name, registers, initial, actions, expected):
     path = directory / name
     definitions = "\n".join(text for _, text, _ in registers) + "\n"
     path.write_text(definitions + initial + "\n")
+    initial_row = len(registers) + 1
+    total_rows = len(registers) + len(initial.split("\n"))
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 150, 0, 0))
     original = termios.tcgetattr(slave)
@@ -39,9 +41,9 @@ def case(directory, name, registers, initial, actions, expected):
             os.write(master, keys.encode())
             # A status command makes a distinct marker after the yank completes.
             os.write(master, b":f\r")
-            receive(master, f"line {row} of {len(registers) + 1}".encode())
-        os.write(master, b"G0")
-        receive(master, f"{len(registers) + 1}/{len(registers) + 1}  col 1".encode())
+            receive(master, f"line {row} of {total_rows}".encode())
+        os.write(master, f"{initial_row}G0".encode())
+        receive(master, f"{initial_row}/{total_rows}  col 1".encode())
         for keys, marker in actions:
             os.write(master, keys)
             if marker:
@@ -154,4 +156,24 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b'2"b@z', b"macro register is empty"), (b"rZ", None)], "Zbcdef")
     case(directory, "previous-prefix-cleanup", [('a', "rZ", False)], "abcdef",
         [(b'2"b@@', b"no previous macro"), (b"rZ", None)], "Zbcdef")
+    case(directory, "counted-x", [('a', "x", False)], "abcdef",
+        [(b"2@a.", None)], "ef")
+    case(directory, "named-x", [('a', "x", False)], "abcdef",
+        [(b'"b3x"bP', None)], "abcdef")
+    case(directory, "counted-D", [('a', "D", False)], "abcdef\nnext",
+        [(b"3@a", None)], "\nnext")
+    case(directory, "named-D", [('a', "D", False)], "abcdef",
+        [(b'"b3@a"bP', None)], "abcdef")
+    case(directory, "D-dot-count", [('a', "Dj2.", False)], "abc\ndef\nghi",
+        [(b"@a", None)], "\n\nghi")
+    case(directory, "counted-C", [('a', "CZ\x1b", False)], "abc\ndef\nghi",
+        [(b"2@a", None)], "Z\nghi")
+    case(directory, "empty-counted-C", [('a', "CX\x1b", False)], "\nnext",
+        [(b"3@a", None)], "XXX\nnext")
+    case(directory, "named-C", [('a', "CX\x1b", False)], "abcdef",
+        [(b'"b@au"bP', None)], "abcdefabcdef")
+    case(directory, "failed-C", [('a', "2CrQ", False)], "abc",
+        [(b"@a", b"operator motion out of bounds"), (b"rZ", None)], "Zbc")
+    case(directory, "empty-x", [('a', "xAboom\x1b", False)], "",
+        [(b"@a", b"no character to delete")], "")
 print("Macros: input stream, grouped undo/redo, nesting, errors, file boundaries and replay passed")

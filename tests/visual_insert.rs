@@ -43,15 +43,17 @@ fn empty_open_and_character_delete_do_not_add_or_join_extra_lines() {
         state.delete_character(&mut editor).unwrap();
         assert_eq!(editor.buffer().to_text(), "\n");
         let before = editor.clone();
-        state.delete_character(&mut editor).unwrap();
+        assert!(state.delete_character(&mut editor).is_err());
         assert_eq!(editor, before);
         editor.undo().unwrap();
         assert_eq!(editor.buffer().to_text(), "中\n");
     }
     let mut editor = Editor::from_buffer(TextBuffer::from_text("\nnext\n").unwrap());
-    VisualState::default()
-        .delete_character(&mut editor)
-        .unwrap();
+    assert!(
+        VisualState::default()
+            .delete_character(&mut editor)
+            .is_err()
+    );
     assert_eq!(editor.buffer().to_text(), "\nnext\n");
     assert!(!editor.is_modified());
 }

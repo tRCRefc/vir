@@ -10,6 +10,16 @@ fn editor(text: &str) -> Editor {
 
 fn input(state: &mut VisualState, editor: &mut Editor, start: InputStart, actions: &[InputAction]) {
     let mut edit = match start {
+        InputStart::ChangeEnd { count, register } => {
+            let mut input = state
+                .begin_counted_insert_register(editor, 'C', count, register)
+                .unwrap();
+            for action in actions {
+                input.apply_input(action).unwrap();
+            }
+            input.commit(state).unwrap();
+            return;
+        }
         InputStart::Insert(mode) => state.begin_insert(editor, mode).unwrap(),
         InputStart::Change { motion, count } => state.begin_change(editor, motion, count).unwrap(),
         InputStart::ChangeNamed {

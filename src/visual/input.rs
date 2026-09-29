@@ -76,11 +76,26 @@ impl VisualState {
         mode: char,
         count: usize,
     ) -> Result<InputSession<'a>, String> {
-        InputSession::new(
-            self.begin_insert(editor, mode)?,
-            InputStart::Insert(mode),
-            count,
-        )
+        self.begin_counted_insert_register(editor, mode, count, None)
+    }
+
+    pub fn begin_counted_insert_register<'a>(
+        &self,
+        editor: &'a mut Editor,
+        mode: char,
+        count: usize,
+        register: Option<char>,
+    ) -> Result<InputSession<'a>, String> {
+        let start = if mode == 'C' {
+            InputStart::ChangeEnd {
+                count: count.max(1),
+                register,
+            }
+        } else {
+            InputStart::Insert(mode)
+        };
+        let repetitions = start.repetitions(self, editor, count);
+        InputSession::new(start.begin(self, editor)?, start, repetitions)
     }
 }
 
@@ -91,7 +106,12 @@ impl<'a> InputSession<'a> {
         count: usize,
     ) -> Result<Self, String> {
         let count = start.input_count(count);
-        if count > 1 && !matches!(start, InputStart::Insert('i' | 'a' | 'I' | 'A' | 'R')) {
+        if count > 1
+            && !matches!(
+                start,
+                InputStart::Insert('i' | 'a' | 'I' | 'A' | 'R') | InputStart::ChangeEnd { .. }
+            )
+        {
             return Err("counted input is supported only for i/a/I/A/R".into());
         }
         check_work(Some(1), count)?;
@@ -127,6 +147,7 @@ impl<'a> InputSession<'a> {
             InputStart::Insert(mode) => mode,
             InputStart::Change { .. } => 'c',
             InputStart::ChangeNamed { .. } => 'c',
+            InputStart::ChangeEnd { .. } => 'c',
         }
     }
 
@@ -304,6 +325,9 @@ impl<'a> InputSession<'a> {
                 self.edit.insert(&self.prefix.repeat(self.remaining - 1))?;
             } else {
                 self.repetitions = 1;
+                if let InputStart::ChangeEnd { count, .. } = &mut self.start {
+                    *count = 1;
+                }
             }
         }
         if self.line_structure_changed {
@@ -328,6 +352,20 @@ impl InputTarget for InputSession<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_empty_c_keeps_only_the_completed_input_count() {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("\nsecond\nthird\n").unwrap());
+        let mut state = VisualState::default();
+        let mut input = state.begin_counted_insert(&mut editor, 'C', 3).unwrap();
+        input.paste("X").unwrap();
+        input.interrupt(&mut state).unwrap();
+        assert_eq!(editor.buffer().to_text(), "X\nsecond\nthird\n");
+        state.row = 1;
+        state.column = 0;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(editor.buffer().to_text(), "X\nX\nthird\n");
+    }
 
     #[test]
     fn zero_expansion_corrections_still_have_a_bounded_replay_recipe() {

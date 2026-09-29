@@ -4,7 +4,7 @@ use super::keys::{NormalPrefix, PrefixAction, normal_motion};
 use super::macro_input::MacroInput;
 use super::operator::Operator;
 use super::paste::normalize;
-use super::{InputStart, Motion, VisualState, clip, screen_column};
+use super::{InputStart, VisualState, clip, screen_column};
 use crate::{editor::Editor, recovery::Recovery};
 use crossterm::{
     cursor,
@@ -284,18 +284,20 @@ fn read_event(width: u16, height: u16) -> io::Result<Event> {
 fn insert_mode(
     editor: &mut Editor,
     state: &mut VisualState,
-    request: (char, usize),
+    request: (char, usize, Option<char>),
     width: &mut u16,
     height: &mut u16,
     recovery: &mut Recovery,
     macros: &mut MacroInput,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     let name = editor_title(editor);
-    let (mode, count) = request;
-    let session = state
-        .begin_counted_insert(editor, mode, count)
-        .map_err(io::Error::other)?;
-    input_session(session, state, &name, width, height, recovery, macros)
+    let (mode, count, register) = request;
+    let session = match state.begin_counted_insert_register(editor, mode, count, register) {
+        Ok(session) => session,
+        Err(error) => return Ok(Some(error)),
+    };
+    input_session(session, state, &name, width, height, recovery, macros)?;
+    Ok(None)
 }
 
 fn input_session(
@@ -520,21 +522,31 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                 match action {
                     Ok(PrefixAction::Pending) => continue,
                     Ok(PrefixAction::Insert(mode, count)) => {
-                        insert_mode(
+                        if let Some(error) = insert_mode(
                             editor,
                             &mut state,
-                            (mode, count),
+                            (mode, count, selected_register),
                             &mut width,
                             &mut height,
                             recovery,
                             &mut macros,
-                        )?;
+                        )? {
+                            command.error(error);
+                        }
                         continue;
                     }
                     Ok(PrefixAction::Replace(count)) => {
                         match state.replacement_end(editor, count) {
                             Ok(_) => normal.replacement = Some(ReplaceKeys::new(count)),
                             Err(error) => command.error(error),
+                        }
+                        continue;
+                    }
+                    Ok(PrefixAction::DeleteCharacters(count)) => {
+                        if let Err(error) =
+                            state.delete_characters(editor, count, selected_register)
+                        {
+                            command.error(error);
                         }
                         continue;
                     }
@@ -674,18 +686,6 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
-                    if let KeyCode::Char(mode @ 'C') = key.code {
-                        insert_mode(
-                            editor,
-                            &mut state,
-                            (mode, 1),
-                            &mut width,
-                            &mut height,
-                            recovery,
-                            &mut macros,
-                        )?;
-                        continue;
-                    }
                     if key.code == KeyCode::Char('U') {
                         if let Err(error) = state.restore_line(editor) {
                             command.error(error);
@@ -694,26 +694,6 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                     }
                     if key.code == KeyCode::Char('u') {
                         if let Err(error) = state.undo(editor) {
-                            command.error(error);
-                        }
-                        continue;
-                    }
-                    if key.code == KeyCode::Char('x') {
-                        if let Err(error) = state.delete_character(editor) {
-                            command.error(error);
-                        }
-                        continue;
-                    }
-                    if key.code == KeyCode::Char('D') {
-                        let length = editor
-                            .buffer()
-                            .line(state.row)
-                            .unwrap_or("")
-                            .chars()
-                            .count();
-                        if state.column < length
-                            && let Err(error) = state.delete_motion(editor, Motion::End, None)
-                        {
                             command.error(error);
                         }
                         continue;
@@ -838,7 +818,7 @@ mod tests {
                     &mut command
                 )
                 .unwrap(),
-            PrefixAction::Pass
+            PrefixAction::DeleteCharacters(Some(1))
         );
         assert_eq!(editor.buffer().line(0), Some("abc"));
     }

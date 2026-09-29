@@ -25,6 +25,7 @@ pub(super) enum PrefixAction {
     Pending,
     Join(usize),
     Replace(usize),
+    DeleteCharacters(Option<usize>),
     Insert(char, usize),
     Move(Motion, usize),
     Repeat(Option<usize>),
@@ -292,13 +293,17 @@ impl NormalPrefix {
         let count = digits.max(1);
         self.complete();
         match key.code {
-            KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R')) => {
-                if InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
+            KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R' | 'C')) => {
+                // C's count selects lines unless the cursor is on an empty
+                // line; its input budget is checked after resolving entry.
+                if mode != 'C' && InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
                     return Err("input repeat too large");
                 }
                 Ok(PrefixAction::Insert(mode, count))
             }
             KeyCode::Char('r') => Ok(PrefixAction::Replace(count)),
+            KeyCode::Char('x') => Ok(PrefixAction::DeleteCharacters(Some(count))),
+            KeyCode::Char('D') => Ok(PrefixAction::DeleteCharacters(None)),
             KeyCode::Char('.') => Ok(PrefixAction::Repeat((digits != 0).then_some(digits))),
             KeyCode::Char(c @ ('p' | 'P')) => Ok(PrefixAction::Put(c == 'P', count)),
             KeyCode::Char('J') => Ok(PrefixAction::Join(count.max(2))),
@@ -371,16 +376,13 @@ mod tests {
     fn counted_input_prefix_is_bounded_and_cancellation_clears_state() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let mut prefix = NormalPrefix::default();
-        for mode in ['i', 'a', 'I', 'A', 'o', 'O', 'R'] {
+        for mode in ['i', 'a', 'I', 'A', 'o', 'O', 'R', 'C'] {
             prefix.key(key('3')).unwrap();
             assert!(prefix.is_pending());
             assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 3)));
             assert!(!prefix.is_pending());
             assert_eq!(prefix.key(key(mode)), Ok(PrefixAction::Insert(mode, 1)));
         }
-        prefix.key(key('2')).unwrap();
-        assert!(prefix.key(key('C')).is_err());
-        assert_eq!(prefix.key(key('i')), Ok(PrefixAction::Insert('i', 1)));
         for c in "1000001".chars() {
             prefix.key(key(c)).unwrap();
         }
@@ -393,6 +395,33 @@ mod tests {
             prefix.key(key('3')).unwrap();
             prefix.key(cancel).unwrap();
             assert_eq!(prefix.key(key('i')), Ok(PrefixAction::Insert('i', 1)));
+        }
+    }
+
+    #[test]
+    fn editing_aliases_consume_counts_and_registers_and_reject_operator_prefixes() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        for (alias, expected) in [
+            ('x', PrefixAction::DeleteCharacters(Some(3))),
+            ('D', PrefixAction::DeleteCharacters(None)),
+            ('C', PrefixAction::Insert('C', 3)),
+        ] {
+            let mut prefix = NormalPrefix::default();
+            for c in "\"a3".chars() {
+                prefix.key(key(c)).unwrap();
+            }
+            assert_eq!(prefix.key(key(alias)), Ok(expected));
+            assert_eq!(prefix.take_register(), Some('a'));
+            assert!(!prefix.is_pending());
+            assert_eq!(
+                prefix.key(key('x')),
+                Ok(PrefixAction::DeleteCharacters(Some(1)))
+            );
+            for operator in ['d', 'c', 'y'] {
+                prefix.key(key(operator)).unwrap();
+                assert!(prefix.key(key(alias)).is_err());
+                assert!(!prefix.is_pending());
+            }
         }
     }
 
@@ -623,8 +652,7 @@ mod tests {
             assert_eq!(prefix.key(key('0')), Ok(PrefixAction::Pass));
         }
         for sequence in [
-            "2U", "3C", "dq", "dg", "9x", "dJ", "2C", "3D", "dr", "cd", "dc", "cq", "yd", "cy",
-            "yp",
+            "2U", "dq", "dg", "dJ", "dr", "cd", "dc", "cq", "yd", "cy", "yp",
         ] {
             for c in sequence[..sequence.len() - 1].chars() {
                 prefix.key(key(c)).unwrap();

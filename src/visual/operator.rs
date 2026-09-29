@@ -589,7 +589,7 @@ fn validate_write_register(selected: Option<char>) -> Result<(), String> {
     }
 }
 
-fn validate_register_target(
+pub(super) fn validate_register_target(
     editor: &Editor,
     selected: Option<char>,
     register: &Register,

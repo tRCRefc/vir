@@ -1,4 +1,4 @@
-use super::{Motion, VisualState, repeat::ChangeRecord};
+use super::{VisualState, repeat::ChangeRecord};
 use crate::{
     buffer::Position,
     editor::{Editor, Register, TextEdit},
@@ -115,10 +115,24 @@ impl VisualState {
     }
 
     pub fn delete_character(&mut self, editor: &mut Editor) -> Result<(), String> {
+        self.delete_characters(editor, Some(1), None)
+    }
+
+    /// x consumes a character count; D always stops at this line's end.
+    pub fn delete_characters(
+        &mut self,
+        editor: &mut Editor,
+        count: Option<usize>,
+        selected: Option<char>,
+    ) -> Result<(), String> {
         let length = editor.buffer().line(self.row).unwrap_or("").chars().count();
         if self.column >= length {
-            return Ok(());
+            return Err("no character to delete".into());
         }
+        let end = self
+            .column
+            .saturating_add(count.unwrap_or(usize::MAX).max(1))
+            .min(length);
         let register = Register::characters(
             editor.buffer(),
             Position {
@@ -127,21 +141,37 @@ impl VisualState {
             },
             Position {
                 row: self.row,
-                column: self.column + 1,
+                column: end,
             },
         )?;
+        super::operator::validate_register_target(editor, selected, &register)?;
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column: self.column,
         })?;
-        edit.delete()?;
-        edit.stage_register(register);
+        edit.delete_range(
+            Position {
+                row: self.row,
+                column: self.column,
+            },
+            Position {
+                row: self.row,
+                column: end,
+            },
+        )?;
+        if let Some(name) = selected {
+            edit.stage_named_register(name, register, name.is_ascii_uppercase());
+        } else {
+            edit.stage_register(register);
+        }
         edit.commit()?;
-        self.column = self.column.min(length.saturating_sub(2));
+        self.column = self
+            .column
+            .min((length - (end - self.column)).saturating_sub(1));
         self.preferred_column = self.column;
-        self.last_change = Some(ChangeRecord::Delete {
-            motion: Some(Motion::Right),
-            count: Some(1),
+        self.last_change = Some(ChangeRecord::DeleteCharacters {
+            count,
+            register: selected,
         });
         Ok(())
     }

@@ -9,6 +9,10 @@ use crate::editor::{Editor, InputAction, TextEdit};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputStart {
     Insert(char),
+    ChangeEnd {
+        count: usize,
+        register: Option<char>,
+    },
     Change {
         motion: Option<Motion>,
         count: Option<usize>,
@@ -34,7 +38,10 @@ impl InputStart {
     fn is_change(&self) -> bool {
         matches!(
             self,
-            Self::Change { .. } | Self::ChangeNamed { .. } | Self::Insert('C')
+            Self::Change { .. }
+                | Self::ChangeNamed { .. }
+                | Self::ChangeEnd { .. }
+                | Self::Insert('C')
         )
     }
 
@@ -74,22 +81,60 @@ impl InputStart {
 
     fn normalized(self) -> Self {
         if self == Self::Insert('C') {
-            Self::Change {
-                motion: Some(Motion::End),
-                count: None,
+            Self::ChangeEnd {
+                count: 1,
+                register: None,
             }
         } else {
             self
         }
     }
 
-    fn begin<'a>(
+    pub(super) fn repetitions(
+        &self,
+        state: &VisualState,
+        editor: &Editor,
+        default: usize,
+    ) -> usize {
+        if let Self::ChangeEnd { count, .. } = *self {
+            if state.column
+                >= editor
+                    .buffer()
+                    .line(state.row)
+                    .unwrap_or("")
+                    .chars()
+                    .count()
+            {
+                count
+            } else {
+                1
+            }
+        } else {
+            default
+        }
+    }
+
+    pub(super) fn begin<'a>(
         &self,
         state: &VisualState,
         editor: &'a mut Editor,
     ) -> Result<TextEdit<'a>, String> {
         match *self {
             Self::Insert(mode) => state.begin_insert(editor, mode),
+            Self::ChangeEnd { count, register } => {
+                if state.column
+                    >= editor
+                        .buffer()
+                        .line(state.row)
+                        .unwrap_or("")
+                        .chars()
+                        .count()
+                {
+                    state.begin_insert(editor, 'a')
+                } else {
+                    state.begin_change_register(editor, Some(Motion::End), Some(count), register)
+                }
+            }
             Self::Change { motion, count } => state.begin_change(editor, motion, count),
             Self::ChangeNamed {
                 motion,
@@ -102,6 +147,11 @@ impl InputStart {
 
 #[derive(Debug, Clone)]
 pub(super) enum ChangeRecord {
+    DeleteCharacters {
+        /// None is D, whose count is ignored even by dot.
+        count: Option<usize>,
+        register: Option<char>,
+    },
     Delete {
         motion: Option<Motion>,
         count: Option<usize>,
@@ -136,6 +186,11 @@ impl ChangeRecord {
     fn override_count(&mut self, count: usize) {
         let count = count.max(1);
         match self {
+            Self::DeleteCharacters {
+                count: Some(stored),
+                ..
+            } => *stored = count,
+            Self::DeleteCharacters { count: None, .. } => {}
             Self::Delete { count: stored, .. } | Self::DeleteNamed { count: stored, .. } => {
                 *stored = Some(count)
             }
@@ -143,6 +198,10 @@ impl ChangeRecord {
             Self::Replace { count: stored, .. }
             | Self::Put { count: stored, .. }
             | Self::PutNamed { count: stored, .. } => *stored = count,
+            Self::Input {
+                start: InputStart::ChangeEnd { count: stored, .. },
+                ..
+            } => *stored = count,
             Self::Input {
                 start:
                     InputStart::Change { count: stored, .. }
@@ -157,6 +216,9 @@ impl ChangeRecord {
 
     fn apply(&self, state: &mut VisualState, editor: &mut Editor) -> Result<(), String> {
         match self {
+            Self::DeleteCharacters { count, register } => {
+                state.delete_characters(editor, *count, *register)
+            }
             Self::Delete {
                 motion: Some(motion),
                 count,
@@ -188,11 +250,12 @@ impl ChangeRecord {
                 actions,
                 repetitions,
             } => {
-                validate_work(actions, *repetitions)?;
+                let repetitions = start.repetitions(state, editor, *repetitions);
+                validate_work(actions, repetitions)?;
                 let edit = start.begin(state, editor)?;
                 // Live input and replay share one transaction controller. Its
                 // recipe stays unexpanded; the caller publishes the effective count.
-                let mut session = InputSession::new(edit, start.clone(), *repetitions)?;
+                let mut session = InputSession::new(edit, start.clone(), repetitions)?;
                 for action in actions {
                     session.apply_input(action)?;
                 }
