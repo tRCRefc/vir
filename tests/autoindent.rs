@@ -39,6 +39,17 @@ fn autoindent_commands_reject_addresses_and_unknown_options() {
 }
 
 #[test]
+fn generated_indent_is_removed_when_open_input_is_empty() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("  base\n").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    let input = state.begin_counted_insert(&mut editor, 'o', 1).unwrap();
+    assert_eq!(input.buffer().to_text(), "  base\n  \n");
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "  base\n\n");
+}
+
+#[test]
 fn low_level_text_insertion_is_literal_even_with_autoindent() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("  base").unwrap());
     execute(parse("set ai").unwrap(), &mut editor).unwrap();
