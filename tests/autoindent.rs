@@ -62,6 +62,26 @@ fn open_line_above_uses_original_line_indentation() {
 }
 
 #[test]
+fn whole_line_change_keeps_the_deleted_line_indent() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("  base\n").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    let mut input = state.begin_change(&mut editor, None, Some(1)).unwrap();
+    assert_eq!(input.buffer().to_text(), "  \n");
+    input.apply_input(&InputAction::Insert("X".into())).unwrap();
+    state
+        .commit_input(
+            input,
+            vir::visual::InputStart::Change {
+                motion: None,
+                count: Some(1),
+            },
+        )
+        .unwrap();
+    assert_eq!(editor.buffer().to_text(), "  X\n");
+}
+
+#[test]
 fn low_level_text_insertion_is_literal_even_with_autoindent() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("  base").unwrap());
     execute(parse("set ai").unwrap(), &mut editor).unwrap();

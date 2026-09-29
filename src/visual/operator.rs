@@ -547,6 +547,21 @@ impl VisualState {
             EditRange::Lines(start, end) => Some((start, end)),
             EditRange::Characters(..) => None,
         };
+        let initial_indent = replaced_lines.map(|(start, _)| {
+            editor
+                .buffer()
+                .line(start)
+                .unwrap_or("")
+                .chars()
+                .take_while(|c| matches!(c, ' ' | '\t'))
+                .fold(0, |width, c| {
+                    if c == '\t' {
+                        (width / 8 + 1) * 8
+                    } else {
+                        width + 1
+                    }
+                })
+        });
         let (start, end) = match range {
             EditRange::Characters(start, end) => (start, end),
             EditRange::Lines(start, end) => (
@@ -569,6 +584,9 @@ impl VisualState {
             edit.record_character_replacement(start, end);
         }
         edit.delete_range(start, end)?;
+        if let Some(indent) = initial_indent {
+            edit.seed_autoindent(indent)?;
+        }
         match selected {
             None => edit.stage_register(register),
             Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => {
