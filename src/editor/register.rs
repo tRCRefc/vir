@@ -40,11 +40,12 @@ impl RegisterBank {
             return Err("invalid named register".into());
         }
         let slot = &mut self.named[(lower as u8 - b'a') as usize];
-        *slot = if append {
-            Some(append_register(slot.take(), register)?)
+        if append {
+            let combined = append_register(slot.clone(), register)?;
+            *slot = Some(combined);
         } else {
-            Some(register)
-        };
+            *slot = Some(register);
+        }
         Ok(())
     }
 
@@ -145,5 +146,17 @@ mod tests {
         assert_eq!(bank.numbered(1), Some(&Register::Characters("two".into())));
         assert_eq!(bank.numbered(2), Some(&Register::Characters("one".into())));
         assert_eq!(bank.numbered(0), None);
+    }
+
+    #[test]
+    fn failed_append_preserves_the_existing_named_register() {
+        let mut bank = RegisterBank::default();
+        bank.set_named('a', Register::Characters("text".into()), false)
+            .unwrap();
+        assert!(
+            bank.set_named('A', Register::Lines(vec!["line".into()]), true)
+                .is_err()
+        );
+        assert_eq!(bank.named('a'), Some(&Register::Characters("text".into())));
     }
 }
