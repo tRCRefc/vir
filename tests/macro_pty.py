@@ -65,6 +65,11 @@ def case(directory, name, registers, initial, actions, expected):
 
 with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
+    case(directory, "append-character-to-line", [('a', ":s/a/A/", False), ('A', ":s/b/B/", True)], "ab",
+        [(b"@a", b"AB")], "AB")
+    for linewise in [False, True]:
+        case(directory, f"append-to-character-{linewise}", [('a', ":s/a/A/", linewise), ('A', "rZ", False)], "ab",
+            [(b"@a", b"Zb")], "Zb")
     case(directory, "dot-explicit-register", [('a', "X", False), ('b', "Y", False)], "tail",
         [(b'"ap"b..', b'tXYYail')], "tXYYail")
     case(directory, "insert-repeat", [('a', "A中!\x1b", False)], "tail",
