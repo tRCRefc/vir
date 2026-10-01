@@ -256,6 +256,24 @@ fn whole_line_change_publishes_numbered_history_only_on_commit_and_dot() {
 }
 
 #[test]
+fn named_change_end_saves_numbered_history_but_unnamed_does_not() {
+    for selected in [None, Some('a')] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("abc\n").unwrap());
+        let mut state = VisualState::default();
+        let input = state
+            .begin_counted_insert_register(&mut editor, 'C', 1, selected)
+            .unwrap();
+        input.commit(&mut state).unwrap();
+        assert_eq!(
+            editor.numbered_register(1),
+            selected
+                .map(|_| Register::Characters("abc".into()))
+                .as_ref()
+        );
+    }
+}
+
+#[test]
 fn inline_delete_rolls_numbered_history_only_with_a_named_prefix() {
     for selected in [None, Some('a')] {
         let mut editor = Editor::from_buffer(TextBuffer::from_text("old\nabc def\n").unwrap());

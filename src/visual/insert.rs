@@ -78,6 +78,9 @@ impl VisualState {
         if mode == 'C' {
             edit.delete_to_line_end()?;
             if let Some(register) = register {
+                if selected.is_some() {
+                    edit.stage_numbered_register(register.clone());
+                }
                 match selected {
                     None => edit.stage_register(register),
                     Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => {
