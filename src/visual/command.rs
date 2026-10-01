@@ -2,7 +2,7 @@ use super::VisualState;
 use crate::{
     editor::Editor,
     ex::{
-        command::{ResultValue, execute},
+        command::{ResultValue, execute, validate_addresses},
         parser::{Command, parse},
     },
 };
@@ -31,7 +31,17 @@ impl VisualState {
                     .into(),
             );
         }
-        let mut result = execute(parsed, editor)?;
+        // ex_cmds counts substitute before its execution, including a
+        // successful same-text replacement. Delete first resolves setCNL.
+        if command == Command::Substitute {
+            editor.enter_macro_command();
+        } else if command == Command::Delete {
+            validate_addresses(&parsed, editor)?;
+            editor.enter_macro_command();
+        }
+        let result = execute(parsed, editor);
+        editor.finish_macro_command();
+        let mut result = result?;
         if matches!(
             command,
             Command::Edit { .. } | Command::Delete | Command::Substitute
@@ -55,5 +65,25 @@ impl VisualState {
             result.output = "Written".into();
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::TextBuffer;
+
+    #[test]
+    fn unchanged_substitute_promotes_before_nested_macro() {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("abcdef").unwrap());
+        let mut state = VisualState::default();
+        editor.begin_macro_undo();
+        state.delete_character(&mut editor).unwrap();
+        state.execute_ex("s/b/b/", &mut editor).unwrap();
+        editor.begin_macro_undo();
+        state.delete_character(&mut editor).unwrap();
+        editor.end_macro_undo();
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer().to_text(), "abcdef");
     }
 }
