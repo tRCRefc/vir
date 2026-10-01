@@ -150,6 +150,12 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
          (b"\x1b", b"[VIEW]"), (b"u", None)], "abcdef")
     case(directory, "unfinished-replace", [('a', "xr", False)], "abcdef",
         [(b"@a", b"bcdef"), (b"Zu", None)], "bcdef")
+    # Wait for Esc to be decoded before sending ':'; contiguous ESC ':' can
+    # be decoded as Alt-: by the terminal input library.
+    case(directory, "exhausted-insert-escape", [('a', "Aone", False)], "tail",
+        [(b"@a", b"tailone"), (b"\x1b", b"[VIEW]")], "tailone")
+    case(directory, "exhausted-multiline-insert-escape", [('a', "Aone\ntwo", True)], "tail",
+        [(b"@a", b"5/5  col 1"), (b"\x1b", b"[VIEW]")], "tailone\ntwo\n")
     case(directory, "unfinished-colon", [('a', "xx:s/c/Z/", False)], "abcdef",
         [(b"@a", b":s/c/Z/"), (b"\ru", None)], "cdef")
     case(directory, "line-undo-after-one", [('a', "xU", False)], "abcdef",
