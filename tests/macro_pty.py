@@ -112,6 +112,14 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b"@bu", None)], "bcdef")
     case(directory, "nested-after-two", [('a', "x", False), ('b', "xx@a", False)], "abcdef",
         [(b"@bu", None)], "abcdef")
+    case(directory, "yank-promotes-before-nesting", [('a', "x", False), ('b', "xyy@a", False)], "abcdef",
+        [(b"@bu", None)], "abcdef")
+    case(directory, "cancelled-operator-promotes", [('a', "x", False), ('b', "xd\x1b@a", False)], "abcdef",
+        [(b"@bu", None)], "abcdef")
+    case(directory, "yank-before-first-edit", [('a', "yyx", False)], "abcdef",
+        [(b"@au", None)], "abcdef")
+    case(directory, "yank-entry-keeps-existing-undo", [('a', "yyx", False)], "abcdef",
+        [(b"rZ@au", None)], "abcdef")
     case(directory, "error-group", [('a', "xxfzx", False)], "abcdef",
         [(b"@a", b"character not found"), (b"u", None)], "abcdef")
     case(directory, "undo-in-macro", [('a', "xxu", False)], "abcdef",

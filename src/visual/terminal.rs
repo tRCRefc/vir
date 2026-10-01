@@ -96,7 +96,24 @@ impl NormalInput {
         command: &mut CommandLine,
     ) -> Result<PrefixAction, String> {
         let Some(mut pending) = self.replacement.take() else {
-            return self.prefix.key(key).map_err(str::to_owned);
+            if !self.prefix.is_pending() {
+                editor.finish_macro_command();
+            }
+            let had_operator = self.prefix.has_operator();
+            let action = self.prefix.key(key).map_err(str::to_owned);
+            if !had_operator && self.prefix.has_operator()
+                || matches!(
+                    action,
+                    Ok(PrefixAction::Replace(_)
+                        | PrefixAction::Insert(..)
+                        | PrefixAction::DeleteCharacters(_)
+                        | PrefixAction::Join(_)
+                        | PrefixAction::Put(..))
+                )
+            {
+                editor.enter_macro_command();
+            }
+            return action;
         };
         match pending.key(key) {
             Ok(ReplaceKey::Pending) => {

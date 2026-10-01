@@ -47,6 +47,10 @@ pub(super) enum PrefixAction {
 }
 
 impl NormalPrefix {
+    pub(super) fn has_operator(&self) -> bool {
+        self.operator.is_some()
+    }
+
     pub(super) fn is_pending(&self) -> bool {
         self.digits != 0
             || self.operator.is_some()

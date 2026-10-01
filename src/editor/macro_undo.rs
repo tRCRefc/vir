@@ -14,6 +14,7 @@ enum MacroPhase {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct MacroUndo {
     phase: MacroPhase,
+    entered: bool,
     // U uses its line undo even while the full-buffer save remains available.
     // getbr restores VMANY at the end of the stream (ex_vget.c).
     saved_group: Option<(TextBuffer, Option<usize>)>,
@@ -28,11 +29,15 @@ impl MacroUndo {
                 MacroPhase::Unchanged
             },
             saved_group: None,
+            entered: false,
         }
     }
 
     /// Keep the live reversible pair: an intervening u can have swapped it.
     pub(super) fn save_change(&mut self) -> bool {
+        if std::mem::take(&mut self.entered) {
+            return !self.is_grouped() || self.saved_group.is_some();
+        }
         match self.phase {
             MacroPhase::Inactive => true,
             MacroPhase::Unchanged => {
@@ -56,6 +61,26 @@ impl MacroUndo {
 }
 
 impl Editor {
+    pub(crate) fn finish_macro_command(&mut self) {
+        self.macro_undo.entered = false;
+    }
+
+    pub(crate) fn enter_macro_command(&mut self) {
+        match self.macro_undo.phase {
+            MacroPhase::Inactive => return,
+            MacroPhase::Unchanged => self.macro_undo.phase = MacroPhase::Once,
+            MacroPhase::Once => {
+                self.macro_undo.entered = false;
+                if self.undo.is_none() {
+                    self.undo = Some((self.buffer.clone(), self.current));
+                }
+                self.save_undo(self.buffer.clone());
+            }
+            MacroPhase::Grouped => {}
+        }
+        self.macro_undo.entered = true;
+    }
+
     pub(super) fn save_undo(&mut self, previous: TextBuffer) {
         let grouped = self.macro_undo.is_grouped();
         if self.macro_undo.save_change() {
@@ -77,6 +102,7 @@ impl Editor {
     }
 
     pub(crate) fn begin_macro_undo(&mut self) {
+        self.macro_undo.entered = false;
         // macpush resets VC_NOCHANGE for a nested call only while FIXUNDO
         // is still enabled; once grouped, nested calls share the same save.
         if !self.macro_undo.is_grouped() {
