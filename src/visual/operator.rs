@@ -280,6 +280,31 @@ impl VisualState {
     ) -> Result<(), String> {
         validate_write_register(selected)?;
         let range = self.motion_range(editor, motion, count, Operator::Delete)?;
+        // vdelete uses the small DEL buffer for unnamed in-line motions.
+        // A named prefix forces xdw even on one line (ex_voper Apply).
+        // Preserve cross-line entry even when an exclusive word endpoint is
+        // normalized back to the previous line's end.
+        let crossed_word_line = word_endpoint(
+            editor.buffer(),
+            Position {
+                row: self.row,
+                column: self.column,
+            },
+            motion,
+            count.unwrap_or(1).max(1),
+            Operator::Delete,
+        )
+        .is_some_and(|endpoint| match endpoint {
+            Endpoint::Exclusive(position) | Endpoint::Inclusive(position) => {
+                position.row != self.row
+            }
+        });
+        let numbered = selected.is_some()
+            || crossed_word_line
+            || match &range {
+                EditRange::Lines(..) => true,
+                EditRange::Characters(start, end) => start.row != end.row,
+            };
         let register = range.capture(editor)?;
         validate_register_target(editor, selected, &register)?;
         match range {
@@ -306,7 +331,9 @@ impl VisualState {
                 );
             }
         }
-        editor.push_numbered_register(register.clone());
+        if numbered {
+            editor.push_numbered_register(register.clone());
+        }
         self.publish_register(editor, selected, register)?;
         self.preferred_column = self.column;
         self.top = self.top.min(self.row);

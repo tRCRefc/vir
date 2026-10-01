@@ -213,6 +213,27 @@ fn line_deletes_shift_numbered_registers() {
 }
 
 #[test]
+fn inline_delete_rolls_numbered_history_only_with_a_named_prefix() {
+    for selected in [None, Some('a')] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("old\nabc def\n").unwrap());
+        let mut state = VisualState::default();
+        state.delete_lines(&mut editor, 1).unwrap();
+        state
+            .delete_motion_register(&mut editor, vir::visual::Motion::Right, Some(2), selected)
+            .unwrap();
+        assert_eq!(editor.buffer().to_text(), "c def\n");
+        assert_eq!(
+            editor.numbered_register(1),
+            Some(&if selected.is_some() {
+                Register::Characters("ab".into())
+            } else {
+                Register::Lines(vec!["old".into()])
+            })
+        );
+    }
+}
+
+#[test]
 fn numbered_register_can_be_pasted_without_changing_unnamed() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("target\nsource\n").unwrap());
     let mut state = VisualState::default();
