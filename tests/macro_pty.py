@@ -70,6 +70,10 @@ def case(directory, name, registers, initial, actions, expected):
 
 with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
+    case(directory, "visual-ex-register-bridge", [('a', "X", False)], "tail",
+        [(b':y b\r:put b\r', None)], "tail\ntail")
+    case(directory, "ex-yank-promotes-before-nesting", [('a', "x", False), ('b', "x:y c\n@a", True)], "abcdef\nlast",
+        [(b"@bu", None)], "abcdef\nlast")
     case(directory, "append-character-to-line", [('a', ":s/a/A/", False), ('A', ":s/b/B/", True)], "ab",
         [(b"@a", b"AB")], "AB")
     for linewise in [False, True]:

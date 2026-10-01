@@ -116,6 +116,29 @@ fn visual_set_autoindent_changes_following_input_sessions() {
 }
 
 #[test]
+fn ex_register_bridge_supports_zero_put_undo_and_empty_buffers() {
+    let (mut editor, mut state) = session("one\ntwo\n");
+    state.execute_ex("2y a", &mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
+    assert!(!editor.is_modified());
+    redraw(&mut editor, &mut state);
+    assert_eq!(state.row, 1);
+    state.execute_ex("0put a", &mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "two\none\ntwo\n");
+    redraw(&mut editor, &mut state);
+    assert_eq!(state.row, 0);
+    state.execute_ex("u", &mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
+    state.execute_ex("%d", &mut editor).unwrap();
+    state.execute_ex("put a", &mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "two\n");
+    redraw(&mut editor, &mut state);
+    let before = editor.clone();
+    assert!(state.execute_ex("put z", &mut editor).is_err());
+    assert_eq!(editor, before);
+}
+
+#[test]
 fn file_commands_preserve_failures_and_sync_loads_names_and_saves() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("中文 file");

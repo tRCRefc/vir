@@ -22,12 +22,14 @@ impl VisualState {
                 | Command::Edit { .. }
                 | Command::File
                 | Command::Delete
+                | Command::Yank { .. }
+                | Command::Put { .. }
                 | Command::Undo
                 | Command::Substitute
                 | Command::SetAutoIndent(_)
         ) {
             return Err(
-                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :u, :s and :set ai/noai"
+                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :yank, :put, :u, :s and :set ai/noai"
                     .into(),
             );
         }
@@ -35,7 +37,10 @@ impl VisualState {
         // successful same-text replacement. Delete first resolves setCNL.
         if command == Command::Substitute {
             editor.enter_macro_command();
-        } else if command == Command::Delete {
+        } else if matches!(
+            command,
+            Command::Delete | Command::Yank { .. } | Command::Put { .. }
+        ) {
             validate_addresses(&parsed, editor)?;
             editor.enter_macro_command();
         }
@@ -44,13 +49,18 @@ impl VisualState {
         let mut result = result?;
         if matches!(
             command,
-            Command::Edit { .. } | Command::Delete | Command::Substitute
+            Command::Edit { .. } | Command::Delete | Command::Substitute | Command::Put { .. }
         ) {
             self.forget_line();
         }
         if matches!(
             command,
-            Command::Edit { .. } | Command::Delete | Command::Undo | Command::Substitute
+            Command::Edit { .. }
+                | Command::Delete
+                | Command::Undo
+                | Command::Substitute
+                | Command::Yank { .. }
+                | Command::Put { .. }
         ) {
             self.row = editor.current().unwrap_or(0);
             self.column = 0;
