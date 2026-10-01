@@ -106,10 +106,10 @@ impl NormalInput {
                     action,
                     Ok(PrefixAction::Replace(_)
                         | PrefixAction::Insert(..)
-                        | PrefixAction::DeleteCharacters(_)
-                        | PrefixAction::Join(_)
-                        | PrefixAction::Put(..))
+                        | PrefixAction::DeleteCharacters(_))
                 )
+                || matches!(action, Ok(PrefixAction::Join(_)))
+                    && state.row + 1 < editor.buffer().line_count()
             {
                 editor.enter_macro_command();
             }
@@ -631,6 +631,11 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     Ok(PrefixAction::Put(before, count)) => {
+                        // ex_vmain rejects an empty unnamed put before
+                        // vmacchng; an explicit empty register fails later.
+                        if selected_register.is_some() || editor.unnamed_register().is_some() {
+                            editor.enter_macro_command();
+                        }
                         if let Err(error) =
                             state.put_selected(editor, before, count, selected_register)
                         {
@@ -760,6 +765,28 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_join_does_not_promote_macro_undo_before_validation() {
+        let mut editor = Editor::default();
+        editor.insert_lines(0, ["abc"]).unwrap();
+        editor.begin_macro_undo();
+        let mut state = VisualState::default();
+        state.delete_character(&mut editor).unwrap();
+        let before = editor.clone();
+        let action = NormalInput::default()
+            .key(
+                KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE),
+                &mut editor,
+                &mut state,
+                &mut CommandLine::default(),
+            )
+            .unwrap();
+        assert_eq!(action, PrefixAction::Join(2));
+        assert_eq!(editor, before);
+        assert!(state.join_lines(&mut editor, 2).is_err());
+        assert_eq!(editor, before);
+    }
 
     #[test]
     fn replacement_retry_completion_and_paste_cancel_do_not_leak_prefixes() {
