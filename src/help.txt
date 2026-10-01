@@ -17,6 +17,7 @@ when stdin and stdout are terminals; piped sessions have no prompt.
   [range]c / d         Change / delete lines
   [range]y [reg]       Yank lines to unnamed or named register
   [address]put [reg]   Put unnamed, named, or numbered register lines
+                      Address 0 inserts before the first line; empty buffers accept put
   u                    Toggle the most recent edit (save preserves undo)
   [range]w [path]       Write all lines or export a range
   [range]wq [path]      Write, then check whether quitting is allowed

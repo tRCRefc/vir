@@ -59,3 +59,28 @@ fn ex_put_failure_preserves_state_when_register_is_empty() {
     assert!(run(&mut editor, "1put").is_err());
     assert_eq!(editor, before);
 }
+
+#[test]
+fn ex_put_accepts_address_zero_and_empty_buffer() {
+    for initial in ["", "tail\n"] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text(initial).unwrap());
+        editor
+            .set_named_register('a', Register::Lines(vec!["saved".into()]), false)
+            .unwrap();
+        let parsed = parse("0put a").unwrap();
+        vir::ex::command::validate_addresses(&parsed, &editor).unwrap();
+        execute(parsed, &mut editor).unwrap();
+        assert_eq!(editor.buffer().to_text(), format!("saved\n{initial}"));
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), initial);
+    }
+    let mut editor = Editor::default();
+    editor
+        .set_named_register('a', Register::Characters("saved".into()), false)
+        .unwrap();
+    run(&mut editor, "put a").unwrap();
+    assert_eq!(editor.buffer().to_text(), "saved\n");
+    let before = editor.clone();
+    assert!(run(&mut editor, "2put a").is_err());
+    assert_eq!(editor, before);
+}

@@ -40,12 +40,12 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
                 .map_err(|e| format!("{e:?}"))?;
             }
         }
-        Command::Append | Command::Insert => {
+        Command::Append | Command::Insert | Command::Put { .. } => {
             insertion_index(
                 parsed.range.clone(),
                 editor.buffer().line_count(),
                 editor.current(),
-                parsed.command == Command::Append,
+                matches!(parsed.command, Command::Append | Command::Put { .. }),
             )
             .map_err(|e| format!("{e:?}"))?;
         }
@@ -54,7 +54,6 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
         | Command::Number
         | Command::Delete
         | Command::Yank { .. }
-        | Command::Put { .. }
         | Command::Change => {
             evaluate(
                 parsed.range.clone(),
@@ -276,6 +275,41 @@ fn execute_resolved(
                     quit: false,
                 });
             }
+            if let Command::Put { register: selected } = parsed.command {
+                let register = match selected {
+                    None => editor
+                        .unnamed_register()
+                        .ok_or("register is empty")?
+                        .clone(),
+                    Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => editor
+                        .named_register(name)
+                        .ok_or("register is empty")?
+                        .clone(),
+                    Some(name @ '1'..='9') => editor
+                        .numbered_register((name as u8 - b'0') as usize)
+                        .ok_or("register is empty")?
+                        .clone(),
+                    Some(_) => return Err("invalid register".into()),
+                };
+                let lines = match register {
+                    crate::editor::Register::Lines(lines) => lines,
+                    crate::editor::Register::Characters(text) => {
+                        text.split('\n').map(str::to_owned).collect()
+                    }
+                };
+                let at = insertion_index(
+                    parsed.range.clone(),
+                    editor.buffer().line_count(),
+                    editor.current(),
+                    true,
+                )
+                .map_err(|e| format!("{e:?}"))?;
+                editor.insert_lines(at, lines)?;
+                return Ok(ResultValue {
+                    output: String::new(),
+                    quit: false,
+                });
+            }
             let buffer = editor.buffer();
             let range = evaluate(parsed.range.clone(), buffer.line_count(), editor.current())
                 .map_err(|e| format!("{e:?}"))?;
@@ -312,38 +346,7 @@ fn execute_resolved(
                     quit: false,
                 });
             }
-            if let Command::Put { register: selected } = parsed.command {
-                let register = match selected {
-                    None => editor
-                        .unnamed_register()
-                        .ok_or("register is empty")?
-                        .clone(),
-                    Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => editor
-                        .named_register(name)
-                        .ok_or("register is empty")?
-                        .clone(),
-                    Some(name @ '1'..='9') => editor
-                        .numbered_register((name as u8 - b'0') as usize)
-                        .ok_or("register is empty")?
-                        .clone(),
-                    Some(_) => return Err("invalid register".into()),
-                };
-                let lines = match register {
-                    crate::editor::Register::Lines(lines) => lines,
-                    crate::editor::Register::Characters(text) => {
-                        text.split('\n').map(str::to_owned).collect()
-                    }
-                };
-                let at = range
-                    .end
-                    .saturating_add(1)
-                    .min(editor.buffer().line_count());
-                editor.insert_lines(at, lines)?;
-                return Ok(ResultValue {
-                    output: String::new(),
-                    quit: false,
-                });
-            }
+
             if parsed.command == Command::Change {
                 editor
                     .replace_lines(range.start, range.end, input_lines.iter().cloned())
