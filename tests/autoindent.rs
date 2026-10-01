@@ -62,6 +62,17 @@ fn open_line_above_uses_original_line_indentation() {
 }
 
 #[test]
+fn generated_indent_uses_tabs_for_each_full_tabstop() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("          base\n").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    let input = state.begin_counted_insert(&mut editor, 'o', 1).unwrap();
+    assert_eq!(input.buffer().to_text(), "          base\n\t  \n");
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "          base\n\n");
+}
+
+#[test]
 fn whole_line_change_keeps_the_deleted_line_indent() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("  base\n").unwrap());
     execute(parse("set ai").unwrap(), &mut editor).unwrap();
