@@ -622,6 +622,11 @@ impl VisualState {
         if let Some(indent) = initial_indent {
             edit.seed_autoindent(indent)?;
         }
+        // Whole-line and cross-line change enter xdw and save deletion
+        // history; a named prefix also forces that entry on a single line.
+        if replaced_lines.is_some() || start.row != end.row || selected.is_some() {
+            edit.stage_numbered_register(register.clone());
+        }
         match selected {
             None => edit.stage_register(register),
             Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => {

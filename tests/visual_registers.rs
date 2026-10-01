@@ -213,6 +213,49 @@ fn line_deletes_shift_numbered_registers() {
 }
 
 #[test]
+fn whole_line_change_publishes_numbered_history_only_on_commit_and_dot() {
+    use vir::{editor::InputAction, visual::InputStart};
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut state = VisualState::default();
+    drop(state.begin_change(&mut editor, None, Some(1)).unwrap());
+    assert_eq!(editor.numbered_register(1), None);
+    assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
+    let mut edit = state.begin_change(&mut editor, None, Some(1)).unwrap();
+    edit.apply_input(&InputAction::Insert("new".into()))
+        .unwrap();
+    state
+        .commit_input(
+            edit,
+            InputStart::Change {
+                motion: None,
+                count: Some(1),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+    state.row = 1;
+    state.column = 0;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Lines(vec!["two".into()]))
+    );
+    assert_eq!(
+        editor.numbered_register(2),
+        Some(&Register::Lines(vec!["one".into()]))
+    );
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "new\ntwo\n");
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Lines(vec!["two".into()]))
+    );
+}
+
+#[test]
 fn inline_delete_rolls_numbered_history_only_with_a_named_prefix() {
     for selected in [None, Some('a')] {
         let mut editor = Editor::from_buffer(TextBuffer::from_text("old\nabc def\n").unwrap());
