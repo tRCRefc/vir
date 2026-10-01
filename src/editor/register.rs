@@ -41,7 +41,7 @@ impl RegisterBank {
         }
         let slot = &mut self.named[(lower as u8 - b'a') as usize];
         if append {
-            let combined = append_register(slot.clone(), register)?;
+            let combined = append_register(slot.clone(), register);
             *slot = Some(combined);
         } else {
             *slot = Some(register);
@@ -62,18 +62,25 @@ impl RegisterBank {
     }
 }
 
-fn append_register(previous: Option<Register>, next: Register) -> Result<Register, String> {
-    match (previous, next) {
-        (None, next) => Ok(next),
-        (Some(Register::Characters(mut left)), Register::Characters(right)) => {
-            left.push_str(&right);
-            Ok(Register::Characters(left))
+fn append_register(previous: Option<Register>, next: Register) -> Register {
+    let Some(previous) = previous else {
+        return next;
+    };
+    // YANKline terminates every stored record with LF. YANKreg updates
+    // the partial-line flag to the newest write, even for mixed shapes.
+    let mut lines = match previous {
+        Register::Characters(text) => text.split('\n').map(str::to_owned).collect::<Vec<_>>(),
+        Register::Lines(lines) => lines,
+    };
+    match next {
+        Register::Characters(text) => {
+            lines.extend(text.split('\n').map(str::to_owned));
+            Register::Characters(lines.join("\n"))
         }
-        (Some(Register::Lines(mut left)), Register::Lines(right)) => {
-            left.extend(right);
-            Ok(Register::Lines(left))
+        Register::Lines(next) => {
+            lines.extend(next);
+            Register::Lines(lines)
         }
-        _ => Err("cannot append registers of different kinds".into()),
     }
 }
 
@@ -130,7 +137,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             bank.named('a'),
-            Some(&Register::Characters("one two".into()))
+            Some(&Register::Characters("one\n two".into()))
         );
         bank.set_named('a', Register::Lines(vec!["line".into()]), false)
             .unwrap();
@@ -149,14 +156,21 @@ mod tests {
     }
 
     #[test]
-    fn failed_append_preserves_the_existing_named_register() {
+    fn mixed_append_uses_the_new_shape_and_preserves_record_separators() {
         let mut bank = RegisterBank::default();
         bank.set_named('a', Register::Characters("text".into()), false)
             .unwrap();
-        assert!(
-            bank.set_named('A', Register::Lines(vec!["line".into()]), true)
-                .is_err()
+        bank.set_named('A', Register::Lines(vec!["line".into()]), true)
+            .unwrap();
+        assert_eq!(
+            bank.named('a'),
+            Some(&Register::Lines(vec!["text".into(), "line".into()]))
         );
-        assert_eq!(bank.named('a'), Some(&Register::Characters("text".into())));
+        bank.set_named('A', Register::Characters("tail\n".into()), true)
+            .unwrap();
+        assert_eq!(
+            bank.named('a'),
+            Some(&Register::Characters("text\nline\ntail\n".into()))
+        );
     }
 }

@@ -314,6 +314,38 @@ fn named_registers_select_yank_append_delete_and_put() {
 }
 
 #[test]
+fn mixed_named_append_flows_through_delete_change_and_put() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut state = VisualState::default();
+    editor
+        .set_named_register('a', Register::Characters("prefix".into()), false)
+        .unwrap();
+    state
+        .delete_lines_register(&mut editor, 1, Some('A'))
+        .unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Lines(vec!["prefix".into(), "one".into()]))
+    );
+    let mut input = state
+        .begin_counted_insert_register(&mut editor, 'C', 1, Some('A'))
+        .unwrap();
+    input
+        .apply_input(&vir::editor::InputAction::Insert("new".into()))
+        .unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Characters("prefix\none\ntwo".into()))
+    );
+    state.column = 0;
+    state.put_selected(&mut editor, true, 1, Some('a')).unwrap();
+    assert_eq!(editor.buffer().to_text(), "prefix\none\ntwonew\n");
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "new\n");
+}
+
+#[test]
 fn dot_replay_keeps_named_delete_selection() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
     let mut state = VisualState::default();

@@ -48,14 +48,14 @@ fn x_and_d_use_named_registers_without_rolling_the_numbered_chain() {
         .unwrap();
     assert_eq!(
         editor.named_register('a'),
-        Some(&Register::Characters("abcd".into()))
+        Some(&Register::Characters("ab\ncd".into()))
     );
     assert_eq!(editor.numbered_register(1), numbered.as_ref());
     state.undo(&mut editor).unwrap();
     assert_eq!(editor.buffer().to_text(), "cd\n");
     assert_eq!(
         editor.named_register('a'),
-        Some(&Register::Characters("abcd".into()))
+        Some(&Register::Characters("ab\ncd".into()))
     );
 }
 

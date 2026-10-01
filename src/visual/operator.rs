@@ -616,22 +616,9 @@ fn validate_write_register(selected: Option<char>) -> Result<(), String> {
 }
 
 pub(super) fn validate_register_target(
-    editor: &Editor,
+    _editor: &Editor,
     selected: Option<char>,
-    register: &Register,
+    _register: &Register,
 ) -> Result<(), String> {
-    validate_write_register(selected)?;
-    if let Some(name @ 'A'..='Z') = selected
-        && let Some(existing) = editor.named_register(name)
-    {
-        let compatible = matches!(
-            (existing, register),
-            (Register::Characters(_), Register::Characters(_))
-                | (Register::Lines(_), Register::Lines(_))
-        );
-        if !compatible {
-            return Err("cannot append registers of different kinds".into());
-        }
-    }
-    Ok(())
+    validate_write_register(selected)
 }

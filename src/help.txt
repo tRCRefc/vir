@@ -109,6 +109,9 @@ stopping at 9, even when an empty slot causes an error. A register prefix
 on dot overrides the saved selection. Ex yank/put accept an optional register
 argument. System clipboard is not implemented; ex edits and r/R do not
 update the unnamed register yet.
+Uppercase letter writes append stored line records, preserving an LF
+between writes. Mixed character/line writes are allowed; the latest write
+determines whether the combined register is characterwise or linewise.
 @a executes the contents of a letter register as keystrokes;
 @@ repeats the previous macro. Insert/Replace/change and colon commands
 consume the same stream, including Escape, Tab and quoted control keys.

@@ -71,18 +71,6 @@ impl VisualState {
         } else {
             None
         };
-        if let (Some(name @ 'A'..='Z'), Some(register)) = (selected, register.as_ref())
-            && let Some(existing) = editor.named_register(name)
-        {
-            let compatible = matches!(
-                (existing, register),
-                (Register::Characters(_), Register::Characters(_))
-                    | (Register::Lines(_), Register::Lines(_))
-            );
-            if !compatible {
-                return Err("cannot append registers of different kinds".into());
-            }
-        }
         let mut edit = editor.begin_text_edit(Position {
             row: self.row,
             column,
