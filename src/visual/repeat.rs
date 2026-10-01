@@ -383,6 +383,11 @@ impl VisualState {
         {
             *register = char::from(*register as u8 + 1);
         }
+        // lastreg is chosen before the replay runs, even if the selected
+        // register is empty. Keep text/undo atomic while retaining that choice.
+        if matches!(change, ChangeRecord::PutNamed { .. }) {
+            self.last_change = Some(change.clone());
+        }
         if let Some(count) = count {
             change.override_count(count);
         }

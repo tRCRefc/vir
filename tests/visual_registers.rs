@@ -253,6 +253,28 @@ fn explicit_register_on_dot_overrides_automatic_number_advance() {
 }
 
 #[test]
+fn failed_numbered_dot_keeps_its_advanced_slot_without_editing_text() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    let mut state = VisualState::default();
+    state.delete_lines(&mut editor, 1).unwrap();
+    state.put_numbered(&mut editor, false, 1, 1).unwrap();
+    let before = editor.clone();
+    assert!(state.repeat_change(&mut editor, None).is_err());
+    assert_eq!(editor, before);
+    // Fill slot 2 without changing the visual replay recipe. The next dot
+    // must try empty slot 3 rather than retrying the now populated slot 2.
+    VisualState::default().delete_lines(&mut editor, 1).unwrap();
+    state.row = 0;
+    let before = editor.clone();
+    assert!(state.repeat_change(&mut editor, None).is_err());
+    assert_eq!(editor, before);
+    state
+        .repeat_change_register(&mut editor, None, Some('2'))
+        .unwrap();
+    assert_eq!(editor.buffer().to_text(), "one\none\n");
+}
+
+#[test]
 fn named_registers_select_yank_append_delete_and_put() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
     let mut state = VisualState::default();
