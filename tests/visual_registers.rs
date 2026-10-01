@@ -224,16 +224,17 @@ fn numbered_register_can_be_pasted_without_changing_unnamed() {
 }
 
 #[test]
-fn numbered_put_replays_the_selected_numbered_slot() {
+fn numbered_put_replay_advances_through_the_deletion_history() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
     let mut state = VisualState::default();
     state.delete_lines(&mut editor, 1).unwrap();
+    state.delete_lines(&mut editor, 1).unwrap();
     state.row = 0;
     state.put_numbered(&mut editor, false, 1, 1).unwrap();
-    assert_eq!(editor.buffer().to_text(), "two\none\nthree\n");
+    assert_eq!(editor.buffer().to_text(), "three\ntwo\n");
     state.row = 1;
     state.repeat_change(&mut editor, None).unwrap();
-    assert_eq!(editor.buffer().to_text(), "two\none\none\nthree\n");
+    assert_eq!(editor.buffer().to_text(), "three\ntwo\none\n");
 }
 
 #[test]

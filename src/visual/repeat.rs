@@ -332,6 +332,13 @@ impl VisualState {
         count: Option<usize>,
     ) -> Result<(), String> {
         let mut change = self.last_change.clone().ok_or("no change to repeat")?;
+        // ex_vmain increments a numbered lastreg before replaying the command.
+        // The ninth slot is the end of the deletion history.
+        if let ChangeRecord::PutNamed { register, .. } = &mut change
+            && ('1'..='8').contains(register)
+        {
+            *register = char::from(*register as u8 + 1);
+        }
         if let Some(count) = count {
             change.override_count(count);
         }
