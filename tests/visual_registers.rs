@@ -238,6 +238,21 @@ fn numbered_put_replay_advances_through_the_deletion_history() {
 }
 
 #[test]
+fn explicit_register_on_dot_overrides_automatic_number_advance() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
+    let mut state = VisualState::default();
+    state.delete_lines(&mut editor, 1).unwrap();
+    state.delete_lines(&mut editor, 1).unwrap();
+    state.put_numbered(&mut editor, false, 1, 1).unwrap();
+    state
+        .repeat_change_register(&mut editor, None, Some('1'))
+        .unwrap();
+    assert_eq!(editor.buffer().to_text(), "three\ntwo\ntwo\n");
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "three\ntwo\ntwo\none\n");
+}
+
+#[test]
 fn named_registers_select_yank_append_delete_and_put() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
     let mut state = VisualState::default();

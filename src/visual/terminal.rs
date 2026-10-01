@@ -551,7 +551,9 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         continue;
                     }
                     Ok(PrefixAction::Repeat(count)) => {
-                        if let Err(error) = state.repeat_change(editor, count) {
+                        if let Err(error) =
+                            state.repeat_change_register(editor, count, selected_register)
+                        {
                             command.error(error);
                         }
                         continue;

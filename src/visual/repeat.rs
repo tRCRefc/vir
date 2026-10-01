@@ -189,6 +189,39 @@ pub(super) enum ChangeRecord {
 }
 
 impl ChangeRecord {
+    fn override_register(&mut self, selected: char) {
+        match self {
+            Self::Put { before, count } | Self::PutNamed { before, count, .. } => {
+                *self = Self::PutNamed {
+                    before: *before,
+                    count: *count,
+                    register: selected,
+                };
+            }
+            Self::Delete { motion, count } | Self::DeleteNamed { motion, count, .. } => {
+                *self = Self::DeleteNamed {
+                    motion: *motion,
+                    count: *count,
+                    register: selected,
+                };
+            }
+            Self::DeleteCharacters { register, .. } => *register = Some(selected),
+            Self::Input { start, .. } => match start {
+                InputStart::Change { motion, count }
+                | InputStart::ChangeNamed { motion, count, .. } => {
+                    *start = InputStart::ChangeNamed {
+                        motion: *motion,
+                        count: *count,
+                        register: selected,
+                    };
+                }
+                InputStart::ChangeEnd { register, .. } => *register = Some(selected),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
     fn override_count(&mut self, count: usize) {
         let count = count.max(1);
         match self {
@@ -331,10 +364,21 @@ impl VisualState {
         editor: &mut Editor,
         count: Option<usize>,
     ) -> Result<(), String> {
+        self.repeat_change_register(editor, count, None)
+    }
+
+    pub fn repeat_change_register(
+        &mut self,
+        editor: &mut Editor,
+        count: Option<usize>,
+        selected: Option<char>,
+    ) -> Result<(), String> {
         let mut change = self.last_change.clone().ok_or("no change to repeat")?;
         // ex_vmain increments a numbered lastreg before replaying the command.
         // The ninth slot is the end of the deletion history.
-        if let ChangeRecord::PutNamed { register, .. } = &mut change
+        if let Some(register) = selected {
+            change.override_register(register);
+        } else if let ChangeRecord::PutNamed { register, .. } = &mut change
             && ('1'..='8').contains(register)
         {
             *register = char::from(*register as u8 + 1);
