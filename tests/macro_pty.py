@@ -65,6 +65,8 @@ def case(directory, name, registers, initial, actions, expected):
 
 with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
+    case(directory, "dot-explicit-register", [('a', "X", False), ('b', "Y", False)], "tail",
+        [(b'"ap"b..', b'tXYYail')], "tXYYail")
     case(directory, "insert-repeat", [('a', "A中!\x1b", False)], "tail",
         [(b"@a", "tail中!".encode()), (b"@@", "tail中!中!".encode())], "tail中!中!")
     case(directory, "replace-correction", [('a', "0RXY\x7fZ\x1b", False)], "abcdef",

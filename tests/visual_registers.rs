@@ -238,6 +238,20 @@ fn numbered_put_replay_advances_through_the_deletion_history() {
 }
 
 #[test]
+fn numbered_put_dot_stops_at_nine_and_keeps_count_override() {
+    let mut editor =
+        Editor::from_buffer(TextBuffer::from_text("1\n2\n3\n4\n5\n6\n7\n8\n9\nend\n").unwrap());
+    let mut state = VisualState::default();
+    for _ in 0..9 {
+        state.delete_lines(&mut editor, 1).unwrap();
+    }
+    state.put_numbered(&mut editor, false, 1, 8).unwrap();
+    state.repeat_change(&mut editor, Some(2)).unwrap();
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "end\n2\n1\n1\n1\n1\n");
+}
+
+#[test]
 fn explicit_register_on_dot_overrides_automatic_number_advance() {
     let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\nthree\n").unwrap());
     let mut state = VisualState::default();

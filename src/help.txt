@@ -104,7 +104,9 @@ Normal d/dd/D/x and c/cc/C also fill this register; changes publish it
 when the input session commits. Undo, put and file switches preserve it.
 Line puts use LF-terminated lines, even if the original file lacked final
 LF. A double-quote prefix selects a named or numbered register, and dot
-replay retains that selection. Ex yank/put accept an optional register
+replay retains a letter selection. Numbered put replay advances one slot,
+stopping at 9, even when an empty slot causes an error. A register prefix
+on dot overrides the saved selection. Ex yank/put accept an optional register
 argument. System clipboard is not implemented; ex edits and r/R do not
 update the unnamed register yet.
 @a executes the contents of a letter register as keystrokes;
@@ -219,7 +221,8 @@ input segment; o/O open and type once even with n. (historical vi). R
 overwrites once and inserts extra first-segment copies. Each dot is one undo.
 Movement, search, yank, undo, saving and ex commands do not replace the
 visual repeat record; file switches preserve it. Put repeats use the current
-unnamed register. Successful r replaces undo and the repeat record even
+selected register (unnamed unless a prefix selected another).
+Successful r replaces undo and the repeat record even
 when the characters match, and marks the buffer modified. Empty i/a/I/A/R sessions
 ended with Escape also replace undo/repeat and mark modified. This includes
 single-line input whose newly typed characters were all erased with Backspace.
