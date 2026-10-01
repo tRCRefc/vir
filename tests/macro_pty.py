@@ -27,8 +27,9 @@ def case(directory, name, registers, initial, actions, expected):
     path = directory / name
     definitions = "\n".join(text for _, text, _ in registers) + "\n"
     path.write_text(definitions + initial + "\n")
-    initial_row = len(registers) + 1
-    total_rows = len(registers) + len(initial.split("\n"))
+    definition_rows = sum(len(text.split("\n")) for _, text, _ in registers)
+    initial_row = definition_rows + 1
+    total_rows = definition_rows + len(initial.split("\n"))
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 150, 0, 0))
     original = termios.tcgetattr(slave)
@@ -36,12 +37,16 @@ def case(directory, name, registers, initial, actions, expected):
         stderr=subprocess.PIPE, env=dict(os.environ, VIR_RECOVERY_DIR=str(directory)))
     try:
         receive(master, b"[VIEW]")
-        for row, (register, _, linewise) in enumerate(registers, 1):
-            keys = f'{row}G0"{register}' + ("yy" if linewise else "y$")
+        row = 1
+        for register, text, linewise in registers:
+            count = len(text.split("\n"))
+            assert linewise or count == 1, "multiline macro fixtures require linewise registers"
+            keys = f'{row}G0"{register}' + (f"{count}yy" if linewise else "y$")
             os.write(master, keys.encode())
             # A status command makes a distinct marker after the yank completes.
             os.write(master, b":f\r")
             receive(master, f"line {row} of {total_rows}".encode())
+            row += count
         os.write(master, f"{initial_row}G0".encode())
         receive(master, f"{initial_row}/{total_rows}  col 1".encode())
         for keys, marker in actions:
@@ -120,6 +125,10 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b"@au", None)], "abcdef")
     case(directory, "yank-entry-keeps-existing-undo", [('a', "yyx", False)], "abcdef",
         [(b"rZ@au", None)], "abcdef")
+    case(directory, "unchanged-ex-promotes-before-nesting", [('a', "x", False), ('b', "x:s/b/b/\n@a", True)], "abcdef\nlast",
+        [(b"@bu", None)], "abcdef\nlast")
+    case(directory, "ex-delete-promotes-before-nesting", [('a', "x", False), ('b', "x:d\n@a", True)], "abcdef\nsecond\nlast",
+        [(b"@bu", None)], "abcdef\nsecond\nlast")
     case(directory, "error-group", [('a', "xxfzx", False)], "abcdef",
         [(b"@a", b"character not found"), (b"u", None)], "abcdef")
     case(directory, "undo-in-macro", [('a', "xxu", False)], "abcdef",
