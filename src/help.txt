@@ -213,6 +213,8 @@ U again, as do : and search commands (including cancelled prompts).
 U keeps registers and the dot-repeat record; counts are unsupported.
 In Insert/change/R, Ctrl-V or Ctrl-Q quotes the next character: Esc and
 Ctrl-C become text; Enter/Ctrl-J/Ctrl-M split with LF. Quoted NUL is rejected.
+With set ai, Ctrl-W removes the previous input word, Ctrl-D reduces generated
+indent, Ctrl-T increases it, and Ctrl-U kills input back to generated indent.
 Resize preserves quoting; unsupported special keys keep waiting. Paste
 cancels pending quoting and is rejected. No numeric character-code input
 or literal CR. Normal-mode r also supports quoting its replacement.
