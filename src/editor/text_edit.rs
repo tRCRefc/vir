@@ -9,6 +9,7 @@ pub enum InputAction {
     /// Stored or pasted text; replay must not generate indentation.
     InsertLiteral(String),
     Backspace,
+    WordBackspace,
     Delete,
     Replace(char),
     ReplaceText(String),
@@ -112,6 +113,7 @@ impl TextEdit<'_> {
             InputAction::Insert(text) => self.insert_input(text),
             InputAction::InsertLiteral(text) => self.insert(text),
             InputAction::Backspace => self.backspace(),
+            InputAction::WordBackspace => self.word_backspace(),
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
             InputAction::ReplaceText(text) => self.replace_input_text(text),
@@ -570,6 +572,33 @@ impl TextEdit<'_> {
         self.crossed_lines |= start.row != self.undo_anchor.row;
         self.undo_anchor = self.undo_anchor.min(start);
         self.record(InputAction::Backspace);
+        Ok(())
+    }
+
+    pub fn word_backspace(&mut self) -> Result<(), String> {
+        if self.at_generated_indent() || self.cursor.column == 0 {
+            return Ok(());
+        }
+        let line = self.draft.line(self.cursor.row).unwrap_or("");
+        let chars: Vec<char> = line.chars().collect();
+        let mut end = self.cursor.column.min(chars.len());
+        while end > 0 && chars[end - 1].is_whitespace() {
+            end -= 1;
+        }
+        while end > 0 && !chars[end - 1].is_whitespace() {
+            end -= 1;
+        }
+        let start = Position {
+            row: self.cursor.row,
+            column: end,
+        };
+        let cursor = self.cursor;
+        self.cursor = self
+            .draft
+            .replace_text(start, cursor, "")
+            .map_err(str::to_owned)?;
+        self.undo_anchor = self.undo_anchor.min(start);
+        self.record(InputAction::WordBackspace);
         Ok(())
     }
 

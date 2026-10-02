@@ -117,3 +117,14 @@ fn low_level_text_insertion_is_literal_even_with_autoindent() {
     edit.commit().unwrap();
     assert_eq!(editor.buffer().to_text(), "  base\n\tchild\nnext");
 }
+
+#[test]
+fn ctrl_w_word_backspace_removes_whitespace_and_previous_word() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one two  ").unwrap());
+    let mut edit = editor
+        .begin_text_edit(Position { row: 0, column: 9 })
+        .unwrap();
+    edit.apply_input(&InputAction::WordBackspace).unwrap();
+    edit.commit().unwrap();
+    assert_eq!(editor.buffer().to_text(), "one ");
+}

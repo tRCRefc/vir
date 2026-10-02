@@ -157,6 +157,9 @@ fn edit_key(edit: &mut impl InputTarget, replace: bool, key: KeyEvent) -> Result
 }
 
 fn action_for_key(replace: bool, key: KeyEvent) -> Option<InputAction> {
+    if !replace && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('w') {
+        return Some(InputAction::WordBackspace);
+    }
     let character = match key.code {
         KeyCode::Backspace => {
             return Some(if replace {

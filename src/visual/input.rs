@@ -299,6 +299,10 @@ impl<'a> InputSession<'a> {
                     self.edit.backspace()?;
                     self.prefix.pop();
                 }
+                InputAction::WordBackspace => {
+                    self.edit.word_backspace()?;
+                    self.prefix.clear();
+                }
                 _ => self.edit.apply_input(action)?,
             }
         } else {
