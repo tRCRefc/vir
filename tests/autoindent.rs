@@ -141,3 +141,15 @@ fn ctrl_d_reduces_generated_indent_by_one_tabstop() {
     input.commit(&mut state).unwrap();
     assert_eq!(editor.buffer().to_text(), "        base\n\n");
 }
+
+#[test]
+fn ctrl_t_increases_generated_indent_by_one_tabstop() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("base\n").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    let mut input = state.begin_counted_insert(&mut editor, 'o', 1).unwrap();
+    input.apply_input(&InputAction::Forwardtab).unwrap();
+    assert_eq!(input.buffer().to_text(), "base\n\t\n");
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "base\n\n");
+}

@@ -163,6 +163,9 @@ fn action_for_key(replace: bool, key: KeyEvent) -> Option<InputAction> {
     if !replace && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('d') {
         return Some(InputAction::Backtab);
     }
+    if !replace && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('t') {
+        return Some(InputAction::Forwardtab);
+    }
     let character = match key.code {
         KeyCode::Backspace => {
             return Some(if replace {

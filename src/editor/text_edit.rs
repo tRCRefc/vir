@@ -11,6 +11,7 @@ pub enum InputAction {
     Backspace,
     WordBackspace,
     Backtab,
+    Forwardtab,
     Delete,
     Replace(char),
     ReplaceText(String),
@@ -116,6 +117,7 @@ impl TextEdit<'_> {
             InputAction::Backspace => self.backspace(),
             InputAction::WordBackspace => self.word_backspace(),
             InputAction::Backtab => self.backtab(),
+            InputAction::Forwardtab => self.forwardtab(),
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
             InputAction::ReplaceText(text) => self.replace_input_text(text),
@@ -383,7 +385,16 @@ impl TextEdit<'_> {
     }
 
     pub(crate) fn seed_autoindent(&mut self, width: usize) -> Result<(), String> {
-        if !self.editor.autoindent || width == 0 {
+        if !self.editor.autoindent {
+            return Ok(());
+        }
+        if width == 0 {
+            self.indent = Some(GeneratedIndent {
+                row: self.cursor.row,
+                width: 0,
+                columns: 0,
+                literal: false,
+            });
             return Ok(());
         }
         let text = self.generated_text(width)?;
@@ -636,6 +647,44 @@ impl TextEdit<'_> {
             literal: false,
         });
         self.record(InputAction::Backtab);
+        Ok(())
+    }
+
+    /// Increase only the generated auto-indent by one tab stop, matching ^T.
+    pub fn forwardtab(&mut self) -> Result<(), String> {
+        let Some(indent) = self.indent else {
+            return Ok(());
+        };
+        if indent.row != self.cursor.row || indent.literal || self.cursor.column > indent.columns {
+            return Ok(());
+        }
+        let width = indent
+            .width
+            .checked_add(8)
+            .ok_or("input repeat too large")?;
+        let text = self.generated_text(width)?;
+        let end = Position {
+            row: indent.row,
+            column: indent.columns,
+        };
+        self.cursor = self
+            .draft
+            .replace_text(
+                Position {
+                    row: indent.row,
+                    column: 0,
+                },
+                end,
+                &text,
+            )
+            .map_err(str::to_owned)?;
+        self.indent = Some(GeneratedIndent {
+            row: indent.row,
+            width,
+            columns: text.chars().count(),
+            literal: false,
+        });
+        self.record(InputAction::Forwardtab);
         Ok(())
     }
 
