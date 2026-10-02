@@ -166,6 +166,9 @@ fn action_for_key(replace: bool, key: KeyEvent) -> Option<InputAction> {
     if !replace && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('t') {
         return Some(InputAction::Forwardtab);
     }
+    if !replace && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('u') {
+        return Some(InputAction::KillLine);
+    }
     let character = match key.code {
         KeyCode::Backspace => {
             return Some(if replace {

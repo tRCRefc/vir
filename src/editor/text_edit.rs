@@ -12,6 +12,7 @@ pub enum InputAction {
     WordBackspace,
     Backtab,
     Forwardtab,
+    KillLine,
     Delete,
     Replace(char),
     ReplaceText(String),
@@ -118,6 +119,7 @@ impl TextEdit<'_> {
             InputAction::WordBackspace => self.word_backspace(),
             InputAction::Backtab => self.backtab(),
             InputAction::Forwardtab => self.forwardtab(),
+            InputAction::KillLine => self.kill_line(),
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
             InputAction::ReplaceText(text) => self.replace_input_text(text),
@@ -685,6 +687,33 @@ impl TextEdit<'_> {
             literal: false,
         });
         self.record(InputAction::Forwardtab);
+        Ok(())
+    }
+
+    /// Kill typed input back to the generated indent, matching the tty kill key.
+    pub fn kill_line(&mut self) -> Result<(), String> {
+        let end = self.cursor;
+        let start_column = self
+            .indent
+            .filter(|i| i.row == end.row && !i.literal)
+            .map(|i| i.columns)
+            .unwrap_or(0)
+            .min(end.column);
+        if start_column == end.column {
+            return Ok(());
+        }
+        self.cursor = self
+            .draft
+            .replace_text(
+                Position {
+                    row: end.row,
+                    column: start_column,
+                },
+                end,
+                "",
+            )
+            .map_err(str::to_owned)?;
+        self.record(InputAction::KillLine);
         Ok(())
     }
 
