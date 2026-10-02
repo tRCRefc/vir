@@ -128,3 +128,16 @@ fn ctrl_w_word_backspace_removes_whitespace_and_previous_word() {
     edit.commit().unwrap();
     assert_eq!(editor.buffer().to_text(), "one ");
 }
+
+#[test]
+fn ctrl_d_reduces_generated_indent_by_one_tabstop() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("        base\n").unwrap());
+    execute(parse("set ai").unwrap(), &mut editor).unwrap();
+    let mut state = vir::visual::VisualState::default();
+    let mut input = state.begin_counted_insert(&mut editor, 'o', 1).unwrap();
+    assert_eq!(input.buffer().to_text(), "        base\n\t\n");
+    input.apply_input(&InputAction::Backtab).unwrap();
+    assert_eq!(input.buffer().to_text(), "        base\n\n");
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "        base\n\n");
+}

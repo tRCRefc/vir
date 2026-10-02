@@ -10,6 +10,7 @@ pub enum InputAction {
     InsertLiteral(String),
     Backspace,
     WordBackspace,
+    Backtab,
     Delete,
     Replace(char),
     ReplaceText(String),
@@ -114,6 +115,7 @@ impl TextEdit<'_> {
             InputAction::InsertLiteral(text) => self.insert(text),
             InputAction::Backspace => self.backspace(),
             InputAction::WordBackspace => self.word_backspace(),
+            InputAction::Backtab => self.backtab(),
             InputAction::Delete => self.delete(),
             InputAction::Replace(c) => self.replace_input(*c),
             InputAction::ReplaceText(text) => self.replace_input_text(text),
@@ -599,6 +601,41 @@ impl TextEdit<'_> {
             .map_err(str::to_owned)?;
         self.undo_anchor = self.undo_anchor.min(start);
         self.record(InputAction::WordBackspace);
+        Ok(())
+    }
+
+    /// Reduce only the generated auto-indent by one tab stop, matching ^D.
+    pub fn backtab(&mut self) -> Result<(), String> {
+        let Some(indent) = self.indent else {
+            return Ok(());
+        };
+        if indent.row != self.cursor.row || indent.literal || self.cursor.column > indent.columns {
+            return Ok(());
+        }
+        let width = indent.width.saturating_sub(8);
+        let text = self.generated_text(width)?;
+        let end = Position {
+            row: indent.row,
+            column: indent.columns,
+        };
+        self.cursor = self
+            .draft
+            .replace_text(
+                Position {
+                    row: indent.row,
+                    column: 0,
+                },
+                end,
+                &text,
+            )
+            .map_err(str::to_owned)?;
+        self.indent = Some(GeneratedIndent {
+            row: indent.row,
+            width,
+            columns: text.chars().count(),
+            literal: false,
+        });
+        self.record(InputAction::Backtab);
         Ok(())
     }
 
