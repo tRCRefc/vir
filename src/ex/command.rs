@@ -338,9 +338,6 @@ fn execute_resolved(
                     } => editor.set_named_register(name, register, name.is_ascii_uppercase())?,
                     _ => unreachable!(),
                 }
-                editor
-                    .set_current(range.end)
-                    .map_err(|e| format!("{e:?}"))?;
                 return Ok(ResultValue {
                     output: String::new(),
                     quit: false,

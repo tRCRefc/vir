@@ -122,7 +122,7 @@ fn ex_register_bridge_supports_zero_put_undo_and_empty_buffers() {
     assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
     assert!(!editor.is_modified());
     redraw(&mut editor, &mut state);
-    assert_eq!(state.row, 1);
+    assert_eq!(state.row, 0);
     state.execute_ex("0put a", &mut editor).unwrap();
     assert_eq!(editor.buffer().to_text(), "two\none\ntwo\n");
     redraw(&mut editor, &mut state);

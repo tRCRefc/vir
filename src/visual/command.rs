@@ -59,7 +59,6 @@ impl VisualState {
                 | Command::Delete
                 | Command::Undo
                 | Command::Substitute
-                | Command::Yank { .. }
                 | Command::Put { .. }
         ) {
             self.row = editor.current().unwrap_or(0);

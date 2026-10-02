@@ -61,6 +61,17 @@ fn ex_put_failure_preserves_state_when_register_is_empty() {
 }
 
 #[test]
+fn addressed_yank_preserves_current_line() {
+    for command in ["1y", "1y a", "1y A"] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+        editor.set_current(1).unwrap();
+        run(&mut editor, command).unwrap();
+        assert_eq!(editor.current(), Some(1), "{command}");
+        assert!(!editor.is_modified());
+    }
+}
+
+#[test]
 fn ex_put_accepts_address_zero_and_empty_buffer() {
     for initial in ["", "tail\n"] {
         let mut editor = Editor::from_buffer(TextBuffer::from_text(initial).unwrap());
