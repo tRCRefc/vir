@@ -15,6 +15,8 @@ when stdin and stdout are terminals; piped sessions have no prompt.
   [range]p / nu         Print lines / print with line numbers
   [address]a / i       Append after / insert before the addressed line
   [range]c / d         Change / delete lines
+  [range]m address    Move lines after the destination address
+  [range]t address    Copy lines (also :copy / :co)
   [range]j / join     Join lines, using the same spacing rules as visual J
   [address]r [path]   Read an existing UTF-8/LF file after the addressed line
   [range]y [reg]       Yank lines to unnamed or named register
@@ -40,7 +42,11 @@ counts are unsupported. Read accepts address 0 and empty buffers; an omitted
 path uses the current file. Read does not rename the buffer or alter its saved
 file version. Empty files do nothing; missing/invalid files fail atomically.
 Read inserts whole lines (adding a final LF if needed), without autoindent.
-Both commands work at the visual colon prompt and support undo.
+Join/read/move/copy work at the visual colon prompt and support undo.
+Move/copy require one destination address (0, a line, ., $, an offset, or
+a search). Move rejects destinations inside the source and immediately
+before it; copy allows them. The cursor ends on the last moved/copied line.
+Registers and the visual dot recipe are preserved.
 For a/i/c, enter text on subsequent lines; a line containing only '.' ends
 input. Empty a/i does nothing; empty c deletes the selected lines.
 

@@ -153,3 +153,103 @@ fn read_default_path_keeps_original_file_conflict_guard() {
     assert!(execute(parse("w").unwrap(), &mut ed).is_err());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "external\n");
 }
+
+#[test]
+fn move_and_copy_addresses_publish_one_reversible_edit() {
+    for ending in ["", "\n"] {
+        for (command, expected, current) in [
+            ("2,3m0", "b\nc\na\nd\ne", 1),
+            ("2,3move$", "a\nd\ne\nb\nc", 4),
+            ("2,3t0", "b\nc\na\nb\nc\nd\ne", 1),
+            ("2,3copy2", "a\nb\nb\nc\nc\nd\ne", 3),
+            ("2,3co$", "a\nb\nc\nd\ne\nb\nc", 6),
+            ("%t0", "a\nb\nc\nd\ne\na\nb\nc\nd\ne", 4),
+            ("m0", "c\na\nb\nd\ne", 0),
+            ("1t+1", "a\nb\nc\nd\na\ne", 4),
+        ] {
+            let initial = format!("a\nb\nc\nd\ne{ending}");
+            let mut ed = editor(&initial);
+            ed.set_current(2).unwrap();
+            ed.set_named_register('a', Register::Characters("saved".into()), false)
+                .unwrap();
+            let parsed = parse(command).unwrap();
+            validate_addresses(&parsed, &ed).unwrap();
+            execute(parsed, &mut ed).unwrap();
+            assert_eq!(
+                ed.buffer().to_text(),
+                format!("{expected}{ending}"),
+                "{command}"
+            );
+            assert_eq!(ed.current(), Some(current), "{command}");
+            assert_eq!(
+                ed.named_register('a'),
+                Some(&Register::Characters("saved".into()))
+            );
+            assert_eq!(ed.numbered_register(1), None);
+            ed.undo().unwrap();
+            assert_eq!(ed.buffer().to_text(), initial, "{command}");
+            ed.undo().unwrap();
+            assert_eq!(ed.buffer().to_text(), format!("{expected}{ending}"));
+        }
+    }
+}
+
+#[test]
+fn transfer_rejects_invalid_addresses_and_overlapping_move_atomically() {
+    for command in [
+        "2,3m1", "2,3m2", "2,3m3", "%m0", "0t1", "3,2t0", "1m9", "9t0",
+    ] {
+        let mut ed = editor("a\nb\nc\nd\n");
+        ed.insert_lines(4, ["previous edit"]).unwrap();
+        let before = ed.clone();
+        let parsed = parse(command).unwrap();
+        assert!(validate_addresses(&parsed, &ed).is_err(), "{command}");
+        assert!(execute(parsed, &mut ed).is_err(), "{command}");
+        assert_eq!(ed, before, "{command}");
+    }
+    for command in [
+        "m",
+        "copy",
+        "t%",
+        "m1,2",
+        "m0 garbage",
+        "t!",
+        "m-9999999999999999999999999999",
+    ] {
+        assert!(parse(command).is_err(), "{command}");
+    }
+    assert!(execute(parse("t0").unwrap(), &mut Editor::default()).is_err());
+}
+
+#[test]
+fn transfer_search_destinations_reuse_history_only_after_success() {
+    let mut ed = editor("a\nb\nc\nd\n");
+    ed.set_current(0).unwrap();
+    execute(parse("/b/t/d/").unwrap(), &mut ed).unwrap();
+    assert_eq!(ed.buffer().to_text(), "a\nb\nc\nd\nb\n");
+    assert_eq!(ed.last_search(), Some("d"));
+    let before = ed.clone();
+    assert!(execute(parse("1m/missing/").unwrap(), &mut ed).is_err());
+    assert_eq!(ed, before);
+    execute(parse("1t//-1").unwrap(), &mut ed).unwrap();
+    assert_eq!(ed.buffer().to_text(), "a\nb\nc\na\nd\nb\n");
+    assert_eq!(ed.last_search(), Some("d"));
+}
+
+#[test]
+fn visual_transfer_updates_cursor_and_keeps_failed_move_undo() {
+    let mut ed = editor("a\nb\nc\nd\n");
+    let mut state = VisualState::default();
+    state.execute_ex("1,2m$", &mut ed).unwrap();
+    assert_eq!(ed.buffer().to_text(), "c\nd\na\nb\n");
+    assert_eq!((state.row, state.column), (3, 0));
+    let before = ed.clone();
+    assert!(state.execute_ex("3,4m3", &mut ed).is_err());
+    assert_eq!(ed, before);
+    state.execute_ex("u", &mut ed).unwrap();
+    assert_eq!(ed.buffer().to_text(), "a\nb\nc\nd\n");
+    state.execute_ex("1t$", &mut ed).unwrap();
+    assert_eq!(state.row, 4);
+    state.execute_ex("u", &mut ed).unwrap();
+    assert_eq!(ed.buffer().to_text(), "a\nb\nc\nd\n");
+}

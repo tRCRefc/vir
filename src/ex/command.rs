@@ -52,6 +52,9 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
             )
             .map_err(|e| format!("{e:?}"))?;
         }
+        Command::Move | Command::Copy => {
+            transfer_addresses(&parsed, editor)?;
+        }
         Command::Substitute
         | Command::Join
         | Command::Print
@@ -68,6 +71,40 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
         }
     }
     Ok(())
+}
+
+// Both preflight and execution use the same source and destination policy.
+fn transfer_addresses(
+    parsed: &ParsedCommand,
+    editor: &Editor,
+) -> Result<(super::address::LineRange, usize), String> {
+    let range = evaluate(
+        parsed.range.clone(),
+        editor.buffer().line_count(),
+        editor.current(),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    let destination = parsed
+        .destination
+        .clone()
+        .ok_or("missing destination address")?;
+    if destination == super::parser::Address::All {
+        return Err("destination must be a single address".into());
+    }
+    let at = insertion_index(
+        super::parser::Range {
+            start: Some(destination),
+            end: None,
+        },
+        editor.buffer().line_count(),
+        editor.current(),
+        true,
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    if parsed.command == Command::Move && (range.start..=range.end + 1).contains(&at) {
+        return Err("move destination overlaps source or would do nothing".into());
+    }
+    Ok((range, at))
 }
 
 pub fn execute(parsed: ParsedCommand, editor: &mut Editor) -> Result<ResultValue, String> {
@@ -205,6 +242,7 @@ fn execute_resolved(
                 },
                 command: Command::Print,
                 path: None,
+                destination: None,
                 substitution: None,
             },
             editor,
@@ -212,6 +250,14 @@ fn execute_resolved(
     }
     if let Command::SetAutoIndent(enabled) = parsed.command {
         editor.set_autoindent(enabled);
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
+    if matches!(parsed.command, Command::Move | Command::Copy) {
+        let (range, at) = transfer_addresses(&parsed, editor)?;
+        editor.transfer_lines(range.start, range.end, at, parsed.command == Command::Copy)?;
         return Ok(ResultValue {
             output: String::new(),
             quit: false,
@@ -315,7 +361,12 @@ fn execute_resolved(
                 quit: false,
             })
         }
-        Command::PrintNext | Command::Substitute | Command::Join | Command::Read => unreachable!(),
+        Command::PrintNext
+        | Command::Substitute
+        | Command::Join
+        | Command::Read
+        | Command::Move
+        | Command::Copy => unreachable!(),
         Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File => {
             unreachable!()
         }

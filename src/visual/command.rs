@@ -22,6 +22,8 @@ impl VisualState {
                 | Command::Edit { .. }
                 | Command::File
                 | Command::Delete
+                | Command::Move
+                | Command::Copy
                 | Command::Join
                 | Command::Read
                 | Command::Yank { .. }
@@ -31,7 +33,7 @@ impl VisualState {
                 | Command::SetAutoIndent(_)
         ) {
             return Err(
-                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :join, :read, :yank, :put, :u, :s and :set ai/noai"
+                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :join, :read, :move, :copy, :yank, :put, :u, :s and :set ai/noai"
                     .into(),
             );
         }
@@ -42,6 +44,8 @@ impl VisualState {
         } else if matches!(
             command,
             Command::Delete
+                | Command::Move
+                | Command::Copy
                 | Command::Join
                 | Command::Read
                 | Command::Yank { .. }
@@ -57,6 +61,8 @@ impl VisualState {
             command,
             Command::Edit { .. }
                 | Command::Delete
+                | Command::Move
+                | Command::Copy
                 | Command::Join
                 | Command::Read
                 | Command::Substitute
@@ -68,6 +74,8 @@ impl VisualState {
             command,
             Command::Edit { .. }
                 | Command::Delete
+                | Command::Move
+                | Command::Copy
                 | Command::Join
                 | Command::Read
                 | Command::Undo

@@ -122,6 +122,17 @@ impl Editor {
         })
     }
 
+    /// One reversible transaction; registers and file identity are unchanged.
+    pub fn transfer_lines(
+        &mut self,
+        start: usize,
+        end: usize,
+        at: usize,
+        copy: bool,
+    ) -> Result<(), String> {
+        self.edit(|buffer| buffer.transfer_lines(start, end, at, copy).map(Some))
+    }
+
     pub fn delete_lines(&mut self, start: usize, end: usize) -> Result<(), String> {
         self.edit(|buffer| {
             buffer.delete_lines(start, end)?;

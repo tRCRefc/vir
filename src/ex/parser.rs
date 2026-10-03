@@ -34,6 +34,8 @@ pub struct Range {
 pub enum Command {
     Substitute,
     Join,
+    Move,
+    Copy,
     Read,
     Print,
     PrintNext,
@@ -60,6 +62,7 @@ pub struct ParsedCommand {
     pub range: Range,
     pub command: Command,
     pub path: Option<String>,
+    pub destination: Option<Address>,
     pub substitution: Option<Substitution>,
 }
 
@@ -96,6 +99,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             },
             command: Command::PrintNext,
             path: None,
+            destination: None,
             substitution: None,
         });
     }
@@ -127,6 +131,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             },
             command: Command::Print,
             path: None,
+            destination: None,
             substitution: None,
         });
     }
@@ -149,6 +154,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
                 },
                 command: Command::SetAutoIndent(true),
                 path: None,
+                destination: None,
                 substitution: None,
             }),
             "noai" | "noautoindent" => Ok(ParsedCommand {
@@ -158,6 +164,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
                 },
                 command: Command::SetAutoIndent(false),
                 path: None,
+                destination: None,
                 substitution: None,
             }),
             _ => Err(ParseError::UnexpectedArguments),
@@ -194,6 +201,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             },
             command: Command::Substitute,
             path: None,
+            destination: None,
             substitution: Some(Substitution {
                 pattern,
                 replacement,
@@ -202,6 +210,8 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         });
     }
     let mut command = match name {
+        "m" | "mo" | "mov" | "move" => Command::Move,
+        "t" | "co" | "cop" | "copy" => Command::Copy,
         "j" | "jo" | "joi" | "join" => Command::Join,
         "r" | "re" | "rea" | "read" => Command::Read,
         "p" | "pr" | "pri" | "prin" | "print" => Command::Print,
@@ -239,6 +249,20 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
             Command::Quit { force }
         }
         _ => return Err(ParseError::UnknownCommand),
+    };
+    let destination = if matches!(command, Command::Move | Command::Copy) {
+        skip_space(s, &mut i);
+        let address = parse_addr(s, &mut i)?.ok_or(ParseError::InvalidAddress)?;
+        if address == Address::All {
+            return Err(ParseError::InvalidAddress);
+        }
+        skip_space(s, &mut i);
+        if i != s.len() {
+            return Err(ParseError::UnexpectedArguments);
+        }
+        Some(address)
+    } else {
+        None
     };
     let rest = &s[i..];
     let path = if rest.is_empty() {
@@ -284,6 +308,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         },
         command,
         path,
+        destination,
         substitution: None,
     })
 }

@@ -11,7 +11,11 @@ pub fn resolve(
 ) -> Result<(ParsedCommand, Option<String>), String> {
     let mut previous = editor.last_search().map(str::to_owned);
     let mut searched = false;
-    for address in [&mut parsed.range.start, &mut parsed.range.end] {
+    for address in [
+        &mut parsed.range.start,
+        &mut parsed.range.end,
+        &mut parsed.destination,
+    ] {
         let Some(Address::Search {
             pattern,
             forward,

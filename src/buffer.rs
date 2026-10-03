@@ -125,6 +125,32 @@ impl TextBuffer {
         Ok(())
     }
 
+    /// Move or copy a closed line range to an original-buffer gap. Moving
+    /// preserves the file's final-LF convention and never exposes a deletion.
+    pub fn transfer_lines(
+        &mut self,
+        start: usize,
+        end: usize,
+        at: usize,
+        copy: bool,
+    ) -> Result<usize, &'static str> {
+        if start > end || end >= self.lines.len() || at > self.lines.len() {
+            return Err("line transfer address out of bounds");
+        }
+        if !copy && (start..=end + 1).contains(&at) {
+            return Err("move destination overlaps source or would do nothing");
+        }
+        let count = end - start + 1;
+        let lines: Vec<String> = if copy {
+            self.lines[start..=end].to_vec()
+        } else {
+            self.lines.drain(start..=end).collect()
+        };
+        let destination = if !copy && at > end { at - count } else { at };
+        self.lines.splice(destination..destination, lines);
+        Ok(destination + count - 1)
+    }
+
     pub fn delete_lines(&mut self, start: usize, end: usize) -> Result<(), &'static str> {
         if start > end || end >= self.lines.len() {
             return Err("line deletion range out of bounds");

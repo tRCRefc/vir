@@ -72,6 +72,13 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
     source = directory / "read source"
     source.write_text("new\n")
+    case(directory, "ex-move", [('a', ":.,.+1m$", True)], "one\ntwo\nlast",
+        [(b"@a", None)], "last\none\ntwo")
+    case(directory, "ex-copy", [('a', ":t$", True)], "one\ntwo",
+        [(b"@a", None)], "one\ntwo\none")
+    for command in ["m$", "t$"]:
+        case(directory, f"ex-transfer-undo-{command[0]}", [('a', f"x:{command}", True)], "one\ntwo\nlast",
+            [(b"@au", None)], "one\ntwo\nlast")
     case(directory, "ex-join", [('a', ":join", True)], "one.\n two\nlast",
         [(b"@a", b"one.  two")], "one.  two\nlast")
     case(directory, "ex-join-undo", [('a', "x:join", True)], "one\ntwo",
