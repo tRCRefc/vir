@@ -1048,7 +1048,38 @@ def character_find_session(directory):
         os.close(slave)
 
 
+def manual_indent_session(directory):
+    path = directory / "manual-indent"
+    path.write_text("  one\n          two\n")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 80, 0, 0))
+    original = termios.tcgetattr(slave)
+    process = subprocess.Popen([str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+    try:
+        receive(master, b"[VIEW]")
+        os.write(master, b"I\x14X")
+        receive(master, b"Xone")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        os.write(master, b"j.")
+        receive(master, b"Xtwo")
+        os.write(master, b"u")
+        receive(master, b"2/2  col 1")
+        os.write(master, b":wq\r")
+        assert process.wait(timeout=5) == 0
+        assert path.read_text() == "\tXone\n          two\n", path.read_text()
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    manual_indent_session(Path(directory))
     character_find_session(Path(directory))
     newline_replace_undo_session(Path(directory))
     cross_line_undo_session(Path(directory))

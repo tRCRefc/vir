@@ -652,38 +652,37 @@ impl TextEdit<'_> {
         Ok(())
     }
 
-    /// Increase only the generated auto-indent by one tab stop, matching ^T.
+    /// Round the whitespace before the cursor up to the next indent stop.
+    /// Like vgetline's ^T, this also works without automatic indentation.
     pub fn forwardtab(&mut self) -> Result<(), String> {
-        let Some(indent) = self.indent else {
-            return Ok(());
-        };
-        if indent.row != self.cursor.row || indent.literal || self.cursor.column > indent.columns {
+        let prefix: String = self
+            .draft
+            .line(self.cursor.row)
+            .unwrap_or("")
+            .chars()
+            .take(self.cursor.column)
+            .collect();
+        if !prefix.chars().all(|c| matches!(c, ' ' | '\t')) {
             return Ok(());
         }
-        let width = indent
-            .width
-            .checked_add(8 - indent.width % 8)
+        let current_width = indent_width(&prefix);
+        let width = current_width
+            .checked_add(8 - current_width % 8)
             .ok_or("input repeat too large")?;
         let text = self.generated_text(width)?;
-        let end = Position {
-            row: indent.row,
-            column: indent.columns,
+        let start = Position {
+            row: self.cursor.row,
+            column: 0,
         };
         self.cursor = self
             .draft
-            .replace_text(
-                Position {
-                    row: indent.row,
-                    column: 0,
-                },
-                end,
-                &text,
-            )
+            .replace_text(start, self.cursor, &text)
             .map_err(str::to_owned)?;
+        self.undo_anchor = self.undo_anchor.min(start);
         self.indent = Some(GeneratedIndent {
-            row: indent.row,
+            row: self.cursor.row,
             width,
-            columns: text.chars().count(),
+            columns: text.len(),
             literal: false,
         });
         self.record(InputAction::Forwardtab);

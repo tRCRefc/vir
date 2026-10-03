@@ -196,3 +196,61 @@ fn indent_controls_round_to_stops_and_replay_at_target_indent() {
         assert_eq!(editor.buffer().to_text(), after_first);
     }
 }
+
+#[test]
+fn forwardtab_handles_manual_whitespace_without_ai_and_preserves_tail() {
+    for ai in [false, true] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("  尾\n").unwrap());
+        if ai {
+            execute(parse("set ai").unwrap(), &mut editor).unwrap();
+        }
+        let mut state = vir::visual::VisualState::default();
+        state.column = 2;
+        let mut input = state.begin_counted_insert(&mut editor, 'i', 1).unwrap();
+        input
+            .apply_input(&InputAction::Insert("\t  ".into()))
+            .unwrap();
+        input.apply_input(&InputAction::Forwardtab).unwrap();
+        assert_eq!(input.buffer().to_text(), "\t\t尾\n");
+        input.apply_input(&InputAction::Backtab).unwrap();
+        input.apply_input(&InputAction::Insert("X".into())).unwrap();
+        input.commit(&mut state).unwrap();
+        assert_eq!(editor.buffer().to_text(), "\tX尾\n");
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer().to_text(), "  尾\n");
+    }
+}
+
+#[test]
+fn forwardtab_replay_recomputes_manual_target_indent() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("  one\n          two\n").unwrap());
+    let mut state = vir::visual::VisualState::default();
+    let mut input = state.begin_counted_insert(&mut editor, 'I', 1).unwrap();
+    input.apply_input(&InputAction::Forwardtab).unwrap();
+    input.apply_input(&InputAction::Insert("X".into())).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "\tXone\n          two\n");
+    state.row = 1;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "\tXone\n\t\tXtwo\n");
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "\tXone\n          two\n");
+}
+
+#[test]
+fn forwardtab_after_text_is_noop_and_empty_generated_line_is_cleared() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("x tail\n").unwrap());
+    let mut edit = editor
+        .begin_text_edit(Position { row: 0, column: 2 })
+        .unwrap();
+    edit.apply_input(&InputAction::Forwardtab).unwrap();
+    assert_eq!(edit.buffer().to_text(), "x tail\n");
+    assert_eq!(edit.cursor(), Position { row: 0, column: 2 });
+    drop(edit);
+    let mut state = vir::visual::VisualState::default();
+    let mut input = state.begin_counted_insert(&mut editor, 'o', 1).unwrap();
+    input.apply_input(&InputAction::Forwardtab).unwrap();
+    assert_eq!(input.buffer().to_text(), "x tail\n\t\n");
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "x tail\n\n");
+}

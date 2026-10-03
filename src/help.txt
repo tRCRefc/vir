@@ -213,8 +213,12 @@ U again, as do : and search commands (including cancelled prompts).
 U keeps registers and the dot-repeat record; counts are unsupported.
 In Insert/change/R, Ctrl-V or Ctrl-Q quotes the next character: Esc and
 Ctrl-C become text; Enter/Ctrl-J/Ctrl-M split with LF. Quoted NUL is rejected.
-With set ai, Ctrl-W removes the previous input word, Ctrl-D reduces generated
-indent, Ctrl-T increases it, and Ctrl-U kills input back to generated indent.
+In Insert/change, Ctrl-W removes the previous input word and Ctrl-U clears
+input back to generated indent (or the line start). Ctrl-T rounds leading
+spaces/Tabs before the cursor up to the next 8-column stop, even with noai.
+Ctrl-D backs generated indent down to the previous stop. Both leave text
+after the cursor intact; Ctrl-T does nothing after nonblank text. These
+controls are not enabled in Replace mode.
 Resize preserves quoting; unsupported special keys keep waiting. Paste
 cancels pending quoting and is rejected. No numeric character-code input
 or literal CR. Normal-mode r also supports quoting its replacement.
