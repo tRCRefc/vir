@@ -625,7 +625,7 @@ impl TextEdit<'_> {
         if indent.row != self.cursor.row || indent.literal || self.cursor.column > indent.columns {
             return Ok(());
         }
-        let width = indent.width.saturating_sub(8);
+        let width = indent.width.saturating_sub(1) / 8 * 8;
         let text = self.generated_text(width)?;
         let end = Position {
             row: indent.row,
@@ -662,7 +662,7 @@ impl TextEdit<'_> {
         }
         let width = indent
             .width
-            .checked_add(8)
+            .checked_add(8 - indent.width % 8)
             .ok_or("input repeat too large")?;
         let text = self.generated_text(width)?;
         let end = Position {

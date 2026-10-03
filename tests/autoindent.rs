@@ -168,3 +168,31 @@ fn ctrl_u_kills_input_but_keeps_generated_indent() {
     input.commit(&mut state).unwrap();
     assert_eq!(editor.buffer().to_text(), "  base\n\n");
 }
+
+#[test]
+fn indent_controls_round_to_stops_and_replay_at_target_indent() {
+    for (action, first, repeated) in [
+        (InputAction::Backtab, "\t", ""),
+        (InputAction::Forwardtab, "\t\t", "\t"),
+    ] {
+        let original = "          base\n   target\n";
+        let mut editor = Editor::from_buffer(TextBuffer::from_text(original).unwrap());
+        execute(parse("set ai").unwrap(), &mut editor).unwrap();
+        let mut state = vir::visual::VisualState::default();
+        let mut input = state.begin_counted_insert(&mut editor, 'o', 1).unwrap();
+        input.apply_input(&action).unwrap();
+        input.apply_input(&InputAction::Insert("X".into())).unwrap();
+        input.commit(&mut state).unwrap();
+        let after_first = format!("          base\n{first}X\n   target\n");
+        assert_eq!(editor.buffer().to_text(), after_first);
+        state.row = 2;
+        state.column = 0;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(
+            editor.buffer().to_text(),
+            format!("          base\n{first}X\n   target\n{repeated}X\n")
+        );
+        state.undo(&mut editor).unwrap();
+        assert_eq!(editor.buffer().to_text(), after_first);
+    }
+}
