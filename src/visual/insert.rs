@@ -105,6 +105,28 @@ impl VisualState {
         self.preferred_column = self.column;
     }
 
+    /// X deletes only the characters before this cursor, never a preceding LF.
+    pub fn delete_before(
+        &mut self,
+        editor: &mut Editor,
+        count: usize,
+        register: Option<char>,
+    ) -> Result<(), String> {
+        if self.column == 0 {
+            return Err("no character before cursor".into());
+        }
+        let mut next = self.clone();
+        let deleted = count.max(1).min(self.column);
+        next.column -= deleted;
+        next.delete_characters(editor, Some(deleted), register)?;
+        next.last_change = Some(ChangeRecord::DeleteBefore {
+            count: count.max(1),
+            register,
+        });
+        *self = next;
+        Ok(())
+    }
+
     pub fn delete_character(&mut self, editor: &mut Editor) -> Result<(), String> {
         self.delete_characters(editor, Some(1), None)
     }

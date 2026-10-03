@@ -9,6 +9,10 @@ use crate::editor::{Editor, InputAction, TextEdit};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputStart {
     Insert(char),
+    Substitute {
+        count: usize,
+        register: Option<char>,
+    },
     ChangeEnd {
         count: usize,
         register: Option<char>,
@@ -38,7 +42,8 @@ impl InputStart {
     fn is_change(&self) -> bool {
         matches!(
             self,
-            Self::Change { .. }
+            Self::Substitute { .. }
+                | Self::Change { .. }
                 | Self::ChangeNamed { .. }
                 | Self::ChangeEnd { .. }
                 | Self::Insert('C')
@@ -102,6 +107,9 @@ impl InputStart {
         editor: &Editor,
         default: usize,
     ) -> usize {
+        if matches!(self, Self::Substitute { .. }) {
+            return 1;
+        }
         if let Self::ChangeEnd { count, .. } = *self {
             if state.column
                 >= editor
@@ -127,6 +135,7 @@ impl InputStart {
     ) -> Result<TextEdit<'a>, String> {
         match *self {
             Self::Insert(mode) => state.begin_insert(editor, mode),
+            Self::Substitute { count, register } => state.begin_substitute(editor, count, register),
             Self::ChangeEnd { count, register } => {
                 if state.column
                     >= editor
@@ -153,6 +162,10 @@ impl InputStart {
 
 #[derive(Debug, Clone)]
 pub(super) enum ChangeRecord {
+    DeleteBefore {
+        count: usize,
+        register: Option<char>,
+    },
     DeleteCharacters {
         /// None is D, whose count is ignored even by dot.
         count: Option<usize>,
@@ -205,7 +218,9 @@ impl ChangeRecord {
                     register: selected,
                 };
             }
-            Self::DeleteCharacters { register, .. } => *register = Some(selected),
+            Self::DeleteCharacters { register, .. } | Self::DeleteBefore { register, .. } => {
+                *register = Some(selected)
+            }
             Self::Input { start, .. } => match start {
                 InputStart::Change { motion, count }
                 | InputStart::ChangeNamed { motion, count, .. } => {
@@ -215,7 +230,8 @@ impl ChangeRecord {
                         register: selected,
                     };
                 }
-                InputStart::ChangeEnd { register, .. } => *register = Some(selected),
+                InputStart::ChangeEnd { register, .. }
+                | InputStart::Substitute { register, .. } => *register = Some(selected),
                 _ => {}
             },
             _ => {}
@@ -233,12 +249,15 @@ impl ChangeRecord {
             Self::Delete { count: stored, .. } | Self::DeleteNamed { count: stored, .. } => {
                 *stored = Some(count)
             }
+            Self::DeleteBefore { count: stored, .. } => *stored = count,
             Self::Join(stored) => *stored = count.max(2),
             Self::Replace { count: stored, .. }
             | Self::Put { count: stored, .. }
             | Self::PutNamed { count: stored, .. } => *stored = count,
             Self::Input {
-                start: InputStart::ChangeEnd { count: stored, .. },
+                start:
+                    InputStart::ChangeEnd { count: stored, .. }
+                    | InputStart::Substitute { count: stored, .. },
                 ..
             } => *stored = count,
             Self::Input {
@@ -255,6 +274,9 @@ impl ChangeRecord {
 
     fn apply(&self, state: &mut VisualState, editor: &mut Editor) -> Result<(), String> {
         match self {
+            Self::DeleteBefore { count, register } => {
+                state.delete_before(editor, *count, *register)
+            }
             Self::DeleteCharacters { count, register } => {
                 state.delete_characters(editor, *count, *register)
             }

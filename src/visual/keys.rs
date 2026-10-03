@@ -27,6 +27,7 @@ pub(super) enum PrefixAction {
     Join(usize),
     Replace(usize),
     DeleteCharacters(Option<usize>),
+    DeleteBefore(usize),
     Insert(char, usize),
     Move(Motion, usize),
     Repeat(Option<usize>),
@@ -340,14 +341,19 @@ impl NormalPrefix {
         let count = digits.max(1);
         self.complete();
         match key.code {
-            KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R' | 'C')) => {
+            KeyCode::Char(mode @ ('i' | 'a' | 'I' | 'A' | 'o' | 'O' | 'R' | 'C' | 's')) => {
                 // C's count selects lines unless the cursor is on an empty
                 // line; its input budget is checked after resolving entry.
-                if mode != 'C' && InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK {
+                if !matches!(mode, 'C' | 's')
+                    && InputStart::Insert(mode).input_count(count) > MAX_INPUT_WORK
+                {
                     return Err("input repeat too large");
                 }
                 Ok(PrefixAction::Insert(mode, count))
             }
+            KeyCode::Char('X') => Ok(PrefixAction::DeleteBefore(count)),
+            KeyCode::Char('S') => Ok(PrefixAction::Operate(Operator::Change, None, Some(count))),
+            KeyCode::Char('Y') => Ok(PrefixAction::Operate(Operator::Yank, None, Some(count))),
             KeyCode::Char('r') => Ok(PrefixAction::Replace(count)),
             KeyCode::Char('x') => Ok(PrefixAction::DeleteCharacters(Some(count))),
             KeyCode::Char('D') => Ok(PrefixAction::DeleteCharacters(None)),
@@ -489,6 +495,10 @@ mod tests {
         for (alias, expected) in [
             ('x', PrefixAction::DeleteCharacters(Some(3))),
             ('D', PrefixAction::DeleteCharacters(None)),
+            ('X', PrefixAction::DeleteBefore(3)),
+            ('s', PrefixAction::Insert('s', 3)),
+            ('S', PrefixAction::Operate(Operator::Change, None, Some(3))),
+            ('Y', PrefixAction::Operate(Operator::Yank, None, Some(3))),
             ('C', PrefixAction::Insert('C', 3)),
         ] {
             let mut prefix = NormalPrefix::default();

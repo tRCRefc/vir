@@ -577,6 +577,34 @@ impl VisualState {
         count: Option<usize>,
         selected: Option<char>,
     ) -> Result<TextEdit<'a>, String> {
+        self.begin_change_impl(editor, motion, count, selected, true)
+    }
+
+    pub fn begin_substitute<'a>(
+        &self,
+        editor: &'a mut Editor,
+        count: usize,
+        selected: Option<char>,
+    ) -> Result<TextEdit<'a>, String> {
+        // Original s enters vchange, but xdw's numbered-history test only
+        // matches c/d. Keep its register policy distinct from an explicit cl.
+        self.begin_change_impl(
+            editor,
+            Some(Motion::Right),
+            Some(count.max(1)),
+            selected,
+            false,
+        )
+    }
+
+    fn begin_change_impl<'a>(
+        &self,
+        editor: &'a mut Editor,
+        motion: Option<Motion>,
+        count: Option<usize>,
+        selected: Option<char>,
+        save_numbered: bool,
+    ) -> Result<TextEdit<'a>, String> {
         if matches!(motion, Some(Motion::End)) && count.unwrap_or(1) <= 1 {
             return self.begin_insert_register(editor, 'C', selected);
         }
@@ -668,11 +696,12 @@ impl VisualState {
         }
         // Whole-line and cross-line change enter xdw and save deletion
         // history; a named prefix also forces that entry on a single line.
-        if replaced_lines.is_some()
-            || start.row != end.row
-            || selected.is_some()
-            || crossed_word_line
-            || crossed_mark_line
+        if save_numbered
+            && (replaced_lines.is_some()
+                || start.row != end.row
+                || selected.is_some()
+                || crossed_word_line
+                || crossed_mark_line)
         {
             edit.stage_numbered_register(register.clone());
         }

@@ -20,6 +20,9 @@ fn input(state: &mut VisualState, editor: &mut Editor, start: InputStart, action
             input.commit(state).unwrap();
             return;
         }
+        InputStart::Substitute { count, register } => {
+            state.begin_substitute(editor, count, register).unwrap()
+        }
         InputStart::Insert(mode) => state.begin_insert(editor, mode).unwrap(),
         InputStart::Change { motion, count } => state.begin_change(editor, motion, count).unwrap(),
         InputStart::ChangeNamed {

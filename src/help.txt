@@ -96,6 +96,12 @@ Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
 including a count on dot. C enters Insert after deleting through the end
 of the counted last line (like c$); on an empty line its count repeats the
 first input segment instead. Deletion and input commit as one undo.
+X deletes up to the count of characters before the cursor on this line.
+s replaces up to the count of characters here with one input session; an
+empty line reports an error. S changes whole lines (like cc), and Y yanks
+whole lines (like yy). All accept named registers. X and s use small-delete
+history and do not roll numbered registers; S uses whole-line change history.
+X/s/S support undo and dot; Y preserves the previous dot recipe.
 Esc/Ctrl-C cancels a pending count/operator. Counts
 for unsupported editing commands are rejected.
 Delete motions: dh/dl remove characters left/right; d0 deletes up to the

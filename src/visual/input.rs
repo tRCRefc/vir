@@ -94,6 +94,11 @@ impl VisualState {
                 count: count.max(1),
                 register,
             }
+        } else if mode == 's' {
+            InputStart::Substitute {
+                count: count.max(1),
+                register,
+            }
         } else {
             InputStart::Insert(mode)
         };
@@ -150,7 +155,7 @@ impl<'a> InputSession<'a> {
             InputStart::Insert(mode) => mode,
             InputStart::Change { .. } => 'c',
             InputStart::ChangeNamed { .. } => 'c',
-            InputStart::ChangeEnd { .. } => 'c',
+            InputStart::ChangeEnd { .. } | InputStart::Substitute { .. } => 'c',
         }
     }
 

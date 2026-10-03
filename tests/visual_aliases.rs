@@ -156,3 +156,78 @@ fn c_input_budget_and_first_newline_follow_actual_repetitions() {
     state.undo(&mut editor).unwrap();
     assert_eq!(editor.buffer(), before.buffer());
 }
+
+#[test]
+fn uppercase_x_preserves_small_delete_policy_and_replays_original_count() {
+    use vir::editor::Register;
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("a中bc\n123456\n").unwrap());
+    let mut state = VisualState::default();
+    state.column = 2;
+    state.delete_before(&mut editor, 9, Some('a')).unwrap();
+    assert_eq!(editor.buffer().to_text(), "bc\n123456\n");
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Characters("a中".into()))
+    );
+    assert_eq!(editor.numbered_register(1), None);
+    state.row = 1;
+    state.column = 4;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(editor.buffer().to_text(), "bc\n56\n");
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Characters("1234".into()))
+    );
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "bc\n123456\n");
+    state.column = 0;
+    let before = editor.clone();
+    assert!(state.delete_before(&mut editor, 1, Some('a')).is_err());
+    assert_eq!(editor, before);
+}
+
+#[test]
+fn substitute_characters_clamps_selection_and_does_not_repeat_input() {
+    use vir::editor::{InputAction, Register};
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("abc\n123456\n").unwrap());
+    let mut state = VisualState::default();
+    state.column = 1;
+    let mut input = state
+        .begin_counted_insert_register(&mut editor, 's', 99, Some('a'))
+        .unwrap();
+    input.apply_input(&InputAction::Insert("X".into())).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "aX\n123456\n");
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Characters("bc".into()))
+    );
+    assert_eq!(editor.numbered_register(1), None);
+    state.row = 1;
+    state.column = 1;
+    state.repeat_change(&mut editor, Some(2)).unwrap();
+    assert_eq!(editor.buffer().to_text(), "aX\n1X456\n");
+    assert_eq!(
+        editor.named_register('a'),
+        Some(&Register::Characters("23".into()))
+    );
+    assert_eq!(editor.numbered_register(1), None);
+    state.undo(&mut editor).unwrap();
+    assert_eq!(editor.buffer().to_text(), "aX\n123456\n");
+}
+
+#[test]
+fn substitute_empty_or_cancelled_session_preserves_registers_and_history() {
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("\nabc\n").unwrap());
+    let mut state = VisualState::default();
+    let before = editor.clone();
+    assert!(state.begin_counted_insert(&mut editor, 's', 1).is_err());
+    assert_eq!(editor, before);
+    state.row = 1;
+    drop(
+        state
+            .begin_counted_insert_register(&mut editor, 's', 2, Some('a'))
+            .unwrap(),
+    );
+    assert_eq!(editor, before);
+}

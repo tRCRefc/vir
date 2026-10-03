@@ -70,6 +70,16 @@ def case(directory, name, registers, initial, actions, expected):
 
 with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
+    case(directory, "alias-X", [('a', 'lll"b2X"bP', False)], "abcdef",
+        [(b"@a", None)], "abcdef")
+    case(directory, "alias-s", [('a', '2sX\x1b', False)], "abcdef",
+        [(b"@a3.", None)], "Xef")
+    case(directory, "alias-S", [('a', '2SX\x1b', False)], "one\ntwo\nlast",
+        [(b"@a", None)], "X\nlast")
+    case(directory, "alias-S-undo", [('a', '2SX\x1b', False)], "one\ntwo\nlast",
+        [(b"@au", None)], "one\ntwo\nlast")
+    case(directory, "alias-Y", [('a', '"b2Y"bp', False)], "one\ntwo\nlast",
+        [(b"@a", None)], "one\none\ntwo\ntwo\nlast")
     case(directory, "mark-exact-jump", [('a', "llmaG`arZ", False)], "abcde\nlast",
         [(b"@a", None)], "abZde\nlast")
     case(directory, "mark-line-jump", [('a', "lllmaG'arX", False)], "  abc\nlast",

@@ -106,8 +106,10 @@ impl NormalInput {
                     action,
                     Ok(PrefixAction::Replace(_)
                         | PrefixAction::Insert(..)
-                        | PrefixAction::DeleteCharacters(_))
+                        | PrefixAction::DeleteCharacters(_)
+                        | PrefixAction::DeleteBefore(_))
                 )
+                || !had_operator && matches!(action, Ok(PrefixAction::Operate(..)))
                 || matches!(action, Ok(PrefixAction::Join(_)))
                     && state.row + 1 < editor.buffer().line_count()
             {
@@ -556,6 +558,12 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         match state.replacement_end(editor, count) {
                             Ok(_) => normal.replacement = Some(ReplaceKeys::new(count)),
                             Err(error) => command.error(error),
+                        }
+                        continue;
+                    }
+                    Ok(PrefixAction::DeleteBefore(count)) => {
+                        if let Err(error) = state.delete_before(editor, count, selected_register) {
+                            command.error(error);
                         }
                         continue;
                     }
