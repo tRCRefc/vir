@@ -135,6 +135,13 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b"@bu", None)], "abcdef\nsecond\nlast")
     case(directory, "error-group", [('a', "xxfzx", False)], "abcdef",
         [(b"@a", b"character not found"), (b"u", None)], "abcdef")
+    for suffix, followup, expected in [
+        ("keeps-edits", b"", "cdef"),
+        ("undo", b"u", "abcdef"),
+        ("next-edit-undo", b"rZu", "cdef"),
+    ]:
+        case(directory, f"ex-parse-error-{suffix}", [('a', "xx:bogus\nx", True)], "abcdef",
+            [(b"@a", b"UnknownCommand"), (followup, None)], expected)
     case(directory, "undo-in-macro", [('a', "xxu", False)], "abcdef",
         [(b"@a", b"abcdef"), (b"u", None)], "cdef")
     case(directory, "undo-then-edit", [('a', "xxurZ", False)], "abcdef",

@@ -558,6 +558,26 @@ impl VisualState {
         if matches!(motion, Some(Motion::End)) && count.unwrap_or(1) <= 1 {
             return self.begin_insert_register(editor, 'C', selected);
         }
+        // xdw saves numbered history even when its exclusive endpoint is
+        // normalized back onto the previous line (notably cb at column zero).
+        let crossed_word_line = motion
+            .and_then(|motion| {
+                word_endpoint(
+                    editor.buffer(),
+                    Position {
+                        row: self.row,
+                        column: self.column,
+                    },
+                    motion,
+                    count.unwrap_or(1).max(1),
+                    Operator::Change,
+                )
+            })
+            .is_some_and(|endpoint| match endpoint {
+                Endpoint::Exclusive(position) | Endpoint::Inclusive(position) => {
+                    position.row != self.row
+                }
+            });
         let range = if let Some(motion) = motion {
             self.motion_range(editor, motion, count, Operator::Change)?
         } else {
@@ -624,7 +644,11 @@ impl VisualState {
         }
         // Whole-line and cross-line change enter xdw and save deletion
         // history; a named prefix also forces that entry on a single line.
-        if replaced_lines.is_some() || start.row != end.row || selected.is_some() {
+        if replaced_lines.is_some()
+            || start.row != end.row
+            || selected.is_some()
+            || crossed_word_line
+        {
             edit.stage_numbered_register(register.clone());
         }
         match selected {

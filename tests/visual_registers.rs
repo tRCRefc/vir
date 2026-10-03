@@ -469,3 +469,56 @@ fn named_registers_survive_undo_and_file_switch() {
         Some(&Register::Lines(vec!["one".into()]))
     );
 }
+
+#[test]
+fn backward_word_change_keeps_numbered_history_after_range_normalization() {
+    use vir::{editor::InputAction, visual::InputStart};
+    for motion in [Motion::WordBackward, Motion::BigWordBackward] {
+        let original = "keep word\nnext\nkeep other\nlast\n";
+        let mut editor = Editor::from_buffer(TextBuffer::from_text(original).unwrap());
+        let mut state = VisualState::default();
+        state.row = 1;
+        drop(state.begin_change(&mut editor, Some(motion), None).unwrap());
+        assert_eq!(editor.numbered_register(1), None);
+        assert_eq!(editor.buffer().to_text(), original);
+        let mut edit = state.begin_change(&mut editor, Some(motion), None).unwrap();
+        edit.apply_input(&InputAction::Insert("X".into())).unwrap();
+        state
+            .commit_input(
+                edit,
+                InputStart::Change {
+                    motion: Some(motion),
+                    count: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            editor.buffer().to_text(),
+            "keep X\nnext\nkeep other\nlast\n"
+        );
+        assert_eq!(
+            editor.numbered_register(1),
+            Some(&Register::Characters("word".into()))
+        );
+        state.row = 3;
+        state.column = 0;
+        state.repeat_change(&mut editor, None).unwrap();
+        assert_eq!(
+            editor.numbered_register(1),
+            Some(&Register::Characters("other".into()))
+        );
+        assert_eq!(
+            editor.numbered_register(2),
+            Some(&Register::Characters("word".into()))
+        );
+        state.undo(&mut editor).unwrap();
+        assert_eq!(
+            editor.buffer().to_text(),
+            "keep X\nnext\nkeep other\nlast\n"
+        );
+        assert_eq!(
+            editor.numbered_register(1),
+            Some(&Register::Characters("other".into()))
+        );
+    }
+}
