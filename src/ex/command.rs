@@ -40,16 +40,20 @@ pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(),
                 .map_err(|e| format!("{e:?}"))?;
             }
         }
-        Command::Append | Command::Insert | Command::Put { .. } => {
+        Command::Append | Command::Insert | Command::Put { .. } | Command::Read => {
             insertion_index(
                 parsed.range.clone(),
                 editor.buffer().line_count(),
                 editor.current(),
-                matches!(parsed.command, Command::Append | Command::Put { .. }),
+                matches!(
+                    parsed.command,
+                    Command::Append | Command::Put { .. } | Command::Read
+                ),
             )
             .map_err(|e| format!("{e:?}"))?;
         }
         Command::Substitute
+        | Command::Join
         | Command::Print
         | Command::Number
         | Command::Delete
@@ -213,6 +217,71 @@ fn execute_resolved(
             quit: false,
         });
     }
+    if parsed.command == Command::Read {
+        let at = insertion_index(
+            parsed.range.clone(),
+            editor.buffer().line_count(),
+            editor.current(),
+            true,
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        let path = parsed
+            .path
+            .as_deref()
+            .map(std::path::Path::new)
+            .or(editor.path())
+            .ok_or("no file name")?;
+        // :read inserts only existing regular UTF-8/LF files. It must never
+        // adopt a new file name, origin, or undo history as :edit does.
+        if !std::fs::metadata(path)
+            .map_err(|e| e.to_string())?
+            .is_file()
+        {
+            return Err("read requires a regular file".into());
+        }
+        let (buffer, origin) = crate::file_io::load_with_origin(path).map_err(|e| e.to_string())?;
+        if origin.is_none() {
+            return Err("file no longer exists".into());
+        }
+        editor.insert_lines(
+            at,
+            (0..buffer.line_count()).map(|row| buffer.line(row).unwrap().to_owned()),
+        )?;
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
+    if parsed.command == Command::Join {
+        let mut range = evaluate(
+            parsed.range.clone(),
+            editor.buffer().line_count(),
+            editor.current(),
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        if parsed.range.end.is_none() && parsed.range.start != Some(super::parser::Address::All) {
+            range.end = (range.end + 1).min(editor.buffer().line_count() - 1);
+        }
+        if range.start == range.end {
+            editor
+                .begin_text_edit(crate::buffer::Position {
+                    row: range.start,
+                    column: 0,
+                })?
+                .commit_even_if_unchanged()?;
+        } else {
+            let mut edit = editor.begin_text_edit(crate::buffer::Position {
+                row: range.start,
+                column: 0,
+            })?;
+            edit.join_lines(range.end - range.start + 1)?;
+            edit.commit()?;
+        }
+        return Ok(ResultValue {
+            output: String::new(),
+            quit: false,
+        });
+    }
     match parsed.command {
         Command::Quit { force } => {
             editor.check_quit(force)?;
@@ -246,7 +315,7 @@ fn execute_resolved(
                 quit: false,
             })
         }
-        Command::PrintNext | Command::Substitute => unreachable!(),
+        Command::PrintNext | Command::Substitute | Command::Join | Command::Read => unreachable!(),
         Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File => {
             unreachable!()
         }

@@ -70,6 +70,16 @@ def case(directory, name, registers, initial, actions, expected):
 
 with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
+    source = directory / "read source"
+    source.write_text("new\n")
+    case(directory, "ex-join", [('a', ":join", True)], "one.\n two\nlast",
+        [(b"@a", b"one.  two")], "one.  two\nlast")
+    case(directory, "ex-join-undo", [('a', "x:join", True)], "one\ntwo",
+        [(b"@au", None)], "one\ntwo")
+    case(directory, "ex-read", [('a', f":read {source}", True)], "tail",
+        [(b"@a", b"new")], "tail\nnew")
+    case(directory, "ex-read-undo", [('a', f"x:read {source}", True)], "tail",
+        [(b"@au", None)], "tail")
     case(directory, "visual-ex-register-bridge", [('a', "X", False)], "tail",
         [(b':y b\r:put b\r', None)], "tail\ntail")
     case(directory, "ex-yank-promotes-before-nesting", [('a', "x", False), ('b', "x:y c\n@a", True)], "abcdef\nlast",

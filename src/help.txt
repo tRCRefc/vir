@@ -15,6 +15,8 @@ when stdin and stdout are terminals; piped sessions have no prompt.
   [range]p / nu         Print lines / print with line numbers
   [address]a / i       Append after / insert before the addressed line
   [range]c / d         Change / delete lines
+  [range]j / join     Join lines, using the same spacing rules as visual J
+  [address]r [path]   Read an existing UTF-8/LF file after the addressed line
   [range]y [reg]       Yank lines to unnamed or named register
   [address]put [reg]   Put unnamed, named, or numbered register lines
                       Address 0 inserts before the first line; empty buffers accept put
@@ -32,6 +34,13 @@ when stdin and stdout are terminals; piped sessions have no prompt.
 Addresses: line number, . (current), $ (last), % (all), /pattern/,
 ?pattern?, one +/- offset, or comma-separated endpoints. A bare address
 prints its range. Empty command prints the next line. 0a inserts at top.
+With no range or one address, join includes the following line if present.
+An explicit two-address range joins exactly that range. join! and trailing
+counts are unsupported. Read accepts address 0 and empty buffers; an omitted
+path uses the current file. Read does not rename the buffer or alter its saved
+file version. Empty files do nothing; missing/invalid files fail atomically.
+Read inserts whole lines (adding a final LF if needed), without autoindent.
+Both commands work at the visual colon prompt and support undo.
 For a/i/c, enter text on subsequent lines; a line containing only '.' ends
 input. Empty a/i does nothing; empty c deletes the selected lines.
 

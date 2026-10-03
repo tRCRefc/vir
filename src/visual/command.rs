@@ -22,6 +22,8 @@ impl VisualState {
                 | Command::Edit { .. }
                 | Command::File
                 | Command::Delete
+                | Command::Join
+                | Command::Read
                 | Command::Yank { .. }
                 | Command::Put { .. }
                 | Command::Undo
@@ -29,7 +31,7 @@ impl VisualState {
                 | Command::SetAutoIndent(_)
         ) {
             return Err(
-                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :yank, :put, :u, :s and :set ai/noai"
+                "visual supports only :w, :q, :q!, :wq, :e[!], :f, :d, :join, :read, :yank, :put, :u, :s and :set ai/noai"
                     .into(),
             );
         }
@@ -39,7 +41,11 @@ impl VisualState {
             editor.enter_macro_command();
         } else if matches!(
             command,
-            Command::Delete | Command::Yank { .. } | Command::Put { .. }
+            Command::Delete
+                | Command::Join
+                | Command::Read
+                | Command::Yank { .. }
+                | Command::Put { .. }
         ) {
             validate_addresses(&parsed, editor)?;
             editor.enter_macro_command();
@@ -49,7 +55,12 @@ impl VisualState {
         let mut result = result?;
         if matches!(
             command,
-            Command::Edit { .. } | Command::Delete | Command::Substitute | Command::Put { .. }
+            Command::Edit { .. }
+                | Command::Delete
+                | Command::Join
+                | Command::Read
+                | Command::Substitute
+                | Command::Put { .. }
         ) {
             self.forget_line();
         }
@@ -57,6 +68,8 @@ impl VisualState {
             command,
             Command::Edit { .. }
                 | Command::Delete
+                | Command::Join
+                | Command::Read
                 | Command::Undo
                 | Command::Substitute
                 | Command::Put { .. }

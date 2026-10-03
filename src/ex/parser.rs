@@ -33,6 +33,8 @@ pub struct Range {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Substitute,
+    Join,
+    Read,
     Print,
     PrintNext,
     Number,
@@ -200,6 +202,8 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         });
     }
     let mut command = match name {
+        "j" | "jo" | "joi" | "join" => Command::Join,
+        "r" | "re" | "rea" | "read" => Command::Read,
         "p" | "pr" | "pri" | "prin" | "print" => Command::Print,
         "#" | "nu" | "num" | "numb" | "numbe" | "number" => Command::Number,
         "d" | "de" | "del" | "dele" | "delet" | "delete" => Command::Delete,
@@ -261,7 +265,7 @@ pub fn parse(input: &str) -> Result<ParsedCommand, ParseError> {
         None
     } else if matches!(
         command,
-        Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File
+        Command::Write | Command::WriteQuit | Command::Edit { .. } | Command::File | Command::Read
     ) && rest.starts_with([' ', '\t'])
     {
         // One literal path; no shell expansion or command chaining.
