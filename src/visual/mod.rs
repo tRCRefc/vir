@@ -23,6 +23,10 @@ use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
+    Mark {
+        name: char,
+        linewise: bool,
+    },
     Left,
     Right,
     Up,
@@ -188,6 +192,10 @@ impl VisualState {
                     self.column = position.column;
                 }
             }
+            Motion::Mark { name, linewise } => {
+                let _ = self.jump_mark(buffer, name, linewise);
+                return;
+            }
             Motion::Left => self.column = self.column.saturating_sub(steps),
             Motion::Right => self.column = self.column.saturating_add(steps),
             Motion::Up => self.row = self.row.saturating_sub(steps),
@@ -230,6 +238,29 @@ impl VisualState {
         if !vertical {
             self.preferred_column = self.column;
         }
+    }
+
+    /// A mark jump is navigation: it never edits text, undo or the dot recipe.
+    pub fn jump_mark(
+        &mut self,
+        buffer: &TextBuffer,
+        name: char,
+        linewise: bool,
+    ) -> Result<(), String> {
+        let mut position = buffer.mark(name).map_err(str::to_owned)?;
+        if linewise {
+            let line = buffer.line(position.row).ok_or("mark is not set")?;
+            position.column = line
+                .chars()
+                .position(|c| !matches!(c, ' ' | '\t'))
+                .unwrap_or(0);
+        }
+        self.row = position.row;
+        self.column = position.column;
+        self.preferred_column = position.column;
+        self.left = 0;
+        self.top = self.top.min(self.row);
+        Ok(())
     }
 
     pub fn frame(&mut self, buffer: &TextBuffer, name: &str, width: u16, height: u16) -> Frame {

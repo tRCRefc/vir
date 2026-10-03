@@ -16,6 +16,12 @@ pub fn resolve(
         &mut parsed.range.end,
         &mut parsed.destination,
     ] {
+        if let Some(Address::Mark { name, offset }) = address.as_ref() {
+            let row = editor.mark(*name)?.row;
+            let line = (row + 1).checked_add_signed(*offset).ok_or("OutOfBounds")?;
+            *address = Some(Address::Line(line));
+            continue;
+        }
         let Some(Address::Search {
             pattern,
             forward,

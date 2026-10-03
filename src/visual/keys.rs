@@ -15,6 +15,7 @@ pub(super) struct NormalPrefix {
     register_pending: bool,
     selected_register: Option<char>,
     macro_pending: bool,
+    mark_pending: Option<char>,
     macro_count: bool,
     find_pending: Option<(bool, bool, ReplaceKeys)>,
 }
@@ -32,6 +33,7 @@ pub(super) enum PrefixAction {
     Operate(Operator, Option<Motion>, Option<usize>),
     Put(bool, usize),
     Macro(char),
+    SetMark(char),
     Find {
         forward: bool,
         till: bool,
@@ -56,6 +58,7 @@ impl NormalPrefix {
             || self.operator.is_some()
             || self.register_pending
             || self.register.is_some()
+            || self.mark_pending.is_some()
             || self.macro_pending
             || self.find_pending.is_some()
     }
@@ -74,6 +77,35 @@ impl NormalPrefix {
 
     pub(super) fn key(&mut self, key: KeyEvent) -> Result<PrefixAction, &'static str> {
         let active = self.is_pending();
+        if let Some(command) = self.mark_pending.take() {
+            let operator = self.operator;
+            self.complete();
+            if key.code == KeyCode::Esc
+                || key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return Ok(PrefixAction::Pending);
+            }
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                return Err("marks must be lowercase a-z");
+            }
+            let KeyCode::Char(name @ 'a'..='z') = key.code else {
+                return Err("marks must be lowercase a-z");
+            };
+            let motion = Motion::Mark {
+                name,
+                linewise: command == '\'',
+            };
+            return Ok(if command == 'm' {
+                PrefixAction::SetMark(name)
+            } else if let Some((operator, _)) = operator {
+                PrefixAction::Operate(operator, Some(motion), None)
+            } else {
+                PrefixAction::Move(motion, 1)
+            });
+        }
         if self.register_pending {
             if key.code == KeyCode::Esc
                 || key
@@ -188,6 +220,17 @@ impl NormalPrefix {
                 return Err("unsupported operator motion; command cancelled");
             }
             self.macro_pending = true;
+            return Ok(PrefixAction::Pending);
+        }
+        if let KeyCode::Char(command @ ('m' | '\'' | '`')) = key.code {
+            if self.digits != 0
+                || self.operator.is_some_and(|(_, count)| count != 0)
+                || command == 'm' && self.operator.is_some()
+            {
+                *self = Self::default();
+                return Err("invalid count or operator for mark command");
+            }
+            self.mark_pending = Some(command);
             return Ok(PrefixAction::Pending);
         }
         if let KeyCode::Char(command @ ('f' | 'F' | 't' | 'T')) = key.code {
@@ -353,6 +396,44 @@ pub(super) fn normal_motion(key: KeyEvent) -> Option<Motion> {
 mod tests {
     use super::*;
     use crate::{editor::Editor, visual::VisualState};
+    #[test]
+    fn mark_prefixes_cancel_validate_and_preserve_operator_register() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut prefix = NormalPrefix::default();
+        assert_eq!(prefix.key(key('m')), Ok(PrefixAction::Pending));
+        assert!(prefix.is_pending());
+        assert_eq!(prefix.key(key('a')), Ok(PrefixAction::SetMark('a')));
+        for c in "\"bd'".chars() {
+            prefix.key(key(c)).unwrap();
+        }
+        assert_eq!(
+            prefix.key(key('z')),
+            Ok(PrefixAction::Operate(
+                Operator::Delete,
+                Some(Motion::Mark {
+                    name: 'z',
+                    linewise: true
+                }),
+                None
+            ))
+        );
+        assert_eq!(prefix.take_register(), Some('b'));
+        for command in ['m', '\'', '`'] {
+            prefix.key(key(command)).unwrap();
+            assert_eq!(
+                prefix.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                Ok(PrefixAction::Pending)
+            );
+            assert!(!prefix.is_pending());
+            prefix.key(key(command)).unwrap();
+            assert!(prefix.key(key('A')).is_err());
+            assert!(!prefix.is_pending());
+            prefix.key(key('2')).unwrap();
+            assert!(prefix.key(key(command)).is_err());
+            assert!(!prefix.is_pending());
+        }
+    }
+
     #[test]
     fn open_screen_counts_accept_large_values_but_overflow_cancels() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);

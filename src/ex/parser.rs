@@ -6,6 +6,10 @@ pub enum Address {
     Current,
     Last,
     All,
+    Mark {
+        name: char,
+        offset: isize,
+    },
     Search {
         pattern: String,
         forward: bool,
@@ -391,6 +395,16 @@ fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
                 offset: 0,
             }
         }
+        b'\'' => {
+            *i += 1;
+            let name = s[*i..]
+                .chars()
+                .next()
+                .filter(char::is_ascii_lowercase)
+                .ok_or(ParseError::InvalidAddress)?;
+            *i += 1;
+            Address::Mark { name, offset: 0 }
+        }
         b'.' => {
             *i += 1;
             Address::Current
@@ -441,6 +455,12 @@ fn parse_addr(s: &str, i: &mut usize) -> Result<Option<Address>, ParseError> {
             return Ok(Some(Address::Search {
                 pattern,
                 forward,
+                offset: sign * n,
+            }));
+        }
+        if let Address::Mark { name, .. } = a {
+            return Ok(Some(Address::Mark {
+                name,
                 offset: sign * n,
             }));
         }

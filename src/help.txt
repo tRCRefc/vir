@@ -33,7 +33,7 @@ when stdin and stdout are terminals; piped sessions have no prompt.
   [range]s/pat/text/[g] Replace first match per line, or all matches with g
   set ai / set noai   Enable / disable automatic indentation for newlines
 
-Addresses: line number, . (current), $ (last), % (all), /pattern/,
+Addresses: line number, . (current), $ (last), % (all), local mark 'a, /pattern/,
 ?pattern?, one +/- offset, or comma-separated endpoints. A bare address
 prints its range. Empty command prints the next line. 0a inserts at top.
 With no range or one address, join includes the following line if present.
@@ -143,6 +143,19 @@ If a macro runs out during Insert/Replace/change, physical typing continues
 the same input transaction until Esc; undo includes that completed input,
 even across lines. No historical per-line split is emulated at exhaustion.
 There is no recording command or session persistence.
+m[a-z] sets a local mark without editing text; '[a-z] jumps to its line's
+first nonblank and `[a-z] jumps to its exact Unicode scalar position.
+Marks also work in ex addresses (including offsets and move/copy destinations).
+d/c/y accept mark motions: apostrophe is linewise, backtick is exclusive.
+Mark commands reject counts; unset marks report an error. No cross-file marks,
+previous-context jump stack, uppercase marks, or persistence is provided.
+Insertions shift marks with their original text; moves carry them, copies
+leave them on the original. Deleted whole lines lose their marks. A character
+replacement covering a mark anchors it at the replacement start; whole-line
+replacement preserves corresponding rows and clamps columns. Join preserves
+positions within retained text. Marks are part of undo snapshots, so undo/redo
+also restores/removes marks set since that snapshot. Setting a mark itself
+creates no undo entry. Loading a file clears marks; saving does not.
 w/b/e move to the next word start, previous word start, or word end;
 counts such as 3w repeat the motion. Words group Unicode letters/numbers
 and underscore separately from punctuation; Unicode whitespace separates

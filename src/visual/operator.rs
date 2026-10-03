@@ -172,6 +172,25 @@ impl VisualState {
         if buffer.is_empty() {
             return Err("EmptyBuffer".into());
         }
+        if let Motion::Mark { name, linewise } = motion {
+            if count.is_some() {
+                return Err("mark motions do not accept counts".into());
+            }
+            let target = editor.mark(name)?;
+            return if linewise {
+                Ok(EditRange::Lines(
+                    self.row.min(target.row),
+                    self.row.max(target.row),
+                ))
+            } else {
+                EditRange::from_word_endpoint(
+                    buffer,
+                    position,
+                    Endpoint::Exclusive(target),
+                    operator,
+                )
+            };
+        }
         let steps = count.unwrap_or(1).max(1);
         if let Some(endpoint) = word_endpoint(buffer, position, motion, steps, operator) {
             return EditRange::from_word_endpoint(buffer, position, endpoint, operator);
@@ -299,7 +318,10 @@ impl VisualState {
                 position.row != self.row
             }
         });
+        let crossed_mark_line = matches!(motion, Motion::Mark { name, .. }
+            if editor.mark(name).is_ok_and(|position| position.row != self.row));
         let numbered = selected.is_some()
+            || crossed_mark_line
             || crossed_word_line
             || match &range {
                 EditRange::Lines(..) => true,
@@ -578,6 +600,8 @@ impl VisualState {
                     position.row != self.row
                 }
             });
+        let crossed_mark_line = matches!(motion, Some(Motion::Mark { name, .. })
+            if editor.mark(name).is_ok_and(|position| position.row != self.row));
         let range = if let Some(motion) = motion {
             self.motion_range(editor, motion, count, Operator::Change)?
         } else {
@@ -648,6 +672,7 @@ impl VisualState {
             || start.row != end.row
             || selected.is_some()
             || crossed_word_line
+            || crossed_mark_line
         {
             edit.stage_numbered_register(register.clone());
         }

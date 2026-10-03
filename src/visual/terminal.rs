@@ -680,6 +680,24 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         }
                         continue;
                     }
+                    Ok(PrefixAction::SetMark(name)) => {
+                        if let Err(error) = editor.set_mark(
+                            name,
+                            crate::buffer::Position {
+                                row: state.row,
+                                column: state.column,
+                            },
+                        ) {
+                            command.error(error);
+                        }
+                        continue;
+                    }
+                    Ok(PrefixAction::Move(super::Motion::Mark { name, linewise }, _)) => {
+                        if let Err(error) = state.jump_mark(editor.buffer(), name, linewise) {
+                            command.error(error);
+                        }
+                        continue;
+                    }
                     Ok(PrefixAction::Move(motion, count)) => {
                         state.move_counted(motion, Some(count), editor.buffer(), height);
                         continue;
