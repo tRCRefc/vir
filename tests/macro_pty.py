@@ -160,6 +160,23 @@ with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
         [(b"@a", b"tailone"), (b"\x1b", b"[VIEW]")], "tailone")
     case(directory, "exhausted-multiline-insert-escape", [('a', "Aone\ntwo", True)], "tail",
         [(b"@a", b"5/5  col 1"), (b"\x1b", b"[VIEW]")], "tailone\ntwo\n")
+    for suffix, keys, expected in [
+        ("undo", b"u", "tail"),
+        ("redo", b"uu", "tailone\ntwo\nend"),
+    ]:
+        case(directory, f"exhausted-multiline-{suffix}", [('a', "Aone\ntwo", True)], "tail",
+            [(b"@a", b"5/5  col 1"), (b"end", b"end"),
+             (b"\x1b", b"[VIEW]"), (keys, None)], expected)
+    case(directory, "nested-exhausted-input-undo",
+        [('a', "Aone", False), ('b', "xx@a", False)], "abcdef",
+        [(b"@b", b"cdefone"), (b"!", b"cdefone!"),
+         (b"\x1b", b"[VIEW]"), (b"u", None)], "abcdef")
+    case(directory, "exhausted-replace-undo", [('a', "RXY", False)], "abcdef",
+        [(b"@a", b"XYcdef"), (b"Z", b"XYZdef"),
+         (b"\x1b", b"[VIEW]"), (b"u", None)], "abcdef")
+    case(directory, "exhausted-change-undo", [('a', "cwX", False)], "one two",
+        [(b"@a", b"X two"), (b"Y", b"XY two"),
+         (b"\x1b", b"[VIEW]"), (b"u", None)], "one two")
     case(directory, "unfinished-colon", [('a', "xx:s/c/Z/", False)], "abcdef",
         [(b"@a", b":s/c/Z/"), (b"\ru", None)], "cdef")
     case(directory, "line-undo-after-one", [('a', "xU", False)], "abcdef",
