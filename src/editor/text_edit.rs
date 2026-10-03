@@ -774,6 +774,8 @@ impl TextEdit<'_> {
         let end = row
             .saturating_add(count.max(2) - 1)
             .min(self.draft.line_count() - 1);
+        let marks = self.draft.mark_positions();
+        let mut offsets = vec![(0, 0)];
         let mut joined = self.draft.line(row).unwrap().to_owned();
         let column = joined.chars().count();
         for index in row + 1..=end {
@@ -792,6 +794,8 @@ impl TextEdit<'_> {
                 }
                 joined.push(' ');
             }
+            let trimmed = self.draft.line(index).unwrap().chars().count() - next.chars().count();
+            offsets.push((joined.chars().count(), trimmed));
             joined.push_str(next);
         }
         let last_column = self.draft.line(end).unwrap().chars().count();
@@ -806,6 +810,7 @@ impl TextEdit<'_> {
                 &joined,
             )
             .map_err(str::to_owned)?;
+        self.draft.restore_join_marks(marks, row, &offsets);
         self.crossed_lines = true;
         self.cursor = Position {
             row,

@@ -1,4 +1,5 @@
 //! Editable text storage shared by ex and vi.
+mod marks;
 
 /// Zero-based row and Unicode scalar gap; column may equal the line length.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -11,6 +12,7 @@ pub struct Position {
 pub struct TextBuffer {
     lines: Vec<String>,
     trailing_newline: bool,
+    marks: [Option<Position>; 26],
 }
 
 impl TextBuffer {
@@ -70,6 +72,7 @@ impl TextBuffer {
         } else {
             self.lines.splice(start.row..=end.row, replacement);
         }
+        self.adjust_text_marks(start, end, cursor);
         Ok(cursor)
     }
 
@@ -86,6 +89,7 @@ impl TextBuffer {
         Ok(Self {
             lines: body.split('\n').map(str::to_owned).collect(),
             trailing_newline,
+            marks: [None; 26],
         })
     }
 
@@ -118,7 +122,9 @@ impl TextBuffer {
         {
             return Err("inserted lines must not contain line endings");
         }
+        let count = new_lines.len();
         self.lines.splice(at..at, new_lines);
+        self.adjust_line_marks(at, 0, count);
         if !self.lines.is_empty() {
             self.trailing_newline = true;
         }
@@ -148,6 +154,7 @@ impl TextBuffer {
         };
         let destination = if !copy && at > end { at - count } else { at };
         self.lines.splice(destination..destination, lines);
+        self.transfer_marks(start, end, at, copy);
         Ok(destination + count - 1)
     }
 
@@ -156,6 +163,7 @@ impl TextBuffer {
             return Err("line deletion range out of bounds");
         }
         self.lines.drain(start..=end);
+        self.adjust_line_marks(start, end - start + 1, 0);
         if self.lines.is_empty() {
             self.trailing_newline = false;
         }
@@ -182,7 +190,9 @@ impl TextBuffer {
         {
             return Err("replacement lines must not contain line endings");
         }
+        let count = replacement.len();
         self.lines.splice(start..=end, replacement);
+        self.adjust_line_marks(start, end - start + 1, count);
         self.trailing_newline = !self.lines.is_empty();
         Ok(())
     }

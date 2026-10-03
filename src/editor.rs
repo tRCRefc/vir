@@ -83,6 +83,19 @@ impl Editor {
         &self.buffer
     }
 
+    /// Marks are file-local metadata; setting one does not publish an edit.
+    pub fn set_mark(
+        &mut self,
+        name: char,
+        position: crate::buffer::Position,
+    ) -> Result<(), String> {
+        self.buffer.set_mark(name, position).map_err(str::to_owned)
+    }
+
+    pub fn mark(&self, name: char) -> Result<crate::buffer::Position, String> {
+        self.buffer.mark(name).map_err(str::to_owned)
+    }
+
     pub fn current(&self) -> Option<usize> {
         self.current
     }
