@@ -172,6 +172,17 @@ impl VisualState {
         if buffer.is_empty() {
             return Err("EmptyBuffer".into());
         }
+        if motion == Motion::MatchBracket {
+            // Historical % ignores cnt and retains the original operator origin.
+            let target = super::matching::target(buffer, position).ok_or("no matching bracket")?;
+            // ex_voper includes both ends for %, in either direction.
+            return EditRange::from_word_endpoint(
+                buffer,
+                position,
+                Endpoint::Inclusive(target),
+                operator,
+            );
+        }
         if let Motion::Mark { name, linewise } = motion {
             if count.is_some() {
                 return Err("mark motions do not accept counts".into());
@@ -300,7 +311,7 @@ impl VisualState {
         validate_write_register(selected)?;
         let range = self.motion_range(editor, motion, count, Operator::Delete)?;
         // vdelete uses the small DEL buffer for unnamed in-line motions.
-        // A named prefix forces xdw even on one line (ex_voper Apply).
+        // A named prefix or % forces xdw even on one line (ex_voper).
         // Preserve cross-line entry even when an exclusive word endpoint is
         // normalized back to the previous line's end.
         let crossed_word_line = word_endpoint(
@@ -321,6 +332,7 @@ impl VisualState {
         let crossed_mark_line = matches!(motion, Motion::Mark { name, .. }
             if editor.mark(name).is_ok_and(|position| position.row != self.row));
         let numbered = selected.is_some()
+            || motion == Motion::MatchBracket
             || crossed_mark_line
             || crossed_word_line
             || match &range {
@@ -695,9 +707,10 @@ impl VisualState {
             edit.seed_autoindent(indent)?;
         }
         // Whole-line and cross-line change enter xdw and save deletion
-        // history; a named prefix also forces that entry on a single line.
+        // history; a named prefix or % also forces that entry on a single line.
         if save_numbered
-            && (replaced_lines.is_some()
+            && (motion == Some(Motion::MatchBracket)
+                || replaced_lines.is_some()
                 || start.row != end.row
                 || selected.is_some()
                 || crossed_word_line

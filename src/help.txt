@@ -80,8 +80,11 @@ Behavior and limits:
   e! to discard edits, or w NEW_PATH to export them. w! is not implemented.
   A newly opened missing target cannot overwrite a file that appears before
   its first save. The final check and publication still have a race window.
-- No full BRE compatibility, ex command macros, next-with-new-list,
-  substitution confirmation, or multi-line replacement yet.
+- This is a modern, reduced vi/ex implementation. Full historical
+  compatibility is outside its scope. No global commands, mappings/config
+  scripts, shell/filter integration, tags, full BRE compatibility, ex command
+  macros, next-with-new-list, substitution confirmation, or multi-line
+  replacement is provided.
 
 Legacy: vir <unused-opt> <filename> prints a file without editing it.
 This old two-argument entry point is retained; use --ex for editing.
@@ -96,6 +99,11 @@ Tab), O opens above. dd deletes lines; counts support 10dd, d10d or
 including a count on dot. C enters Insert after deleting through the end
 of the counted last line (like c$); on an empty line its count repeats the
 first input segment instead. Deletion and input commit as one undo.
+% finds the first ASCII ()[]{} bracket at or after the cursor on this line,
+then jumps to its partner across lines (forward for an opener, backward for
+a closer). Counts are ignored, including d/c/y motion counts. Operators
+include both endpoints from the original cursor. Strings and comments are
+not parsed; unmatched brackets fail without changing text or history.
 X deletes up to the count of characters before the cursor on this line.
 s replaces up to the count of characters here with one input session; an
 empty line reports an error. S changes whole lines (like cc), and Y yanks
@@ -122,7 +130,7 @@ yy copies lines; yh/yl/yj/yk/y0/y$/yG copy the same ranges as d. Counts
 multiply, e.g. 2y3y copies six lines. Copying preserves text and undo.
 p/P put the unnamed register after/before the cursor (characters) or
 current line (whole lines); 3p repeats the contents in one undo.
-Normal d/dd/D/x and c/cc/C also fill this register; changes publish it
+Normal d/dd/D/x/X and c/cc/C/s/S also fill this register; changes publish it
 when the input session commits. Undo, put and file switches preserve it.
 Line puts use LF-terminated lines, even if the original file lacked final
 LF. A double-quote prefix selects a named or numbered register, and dot
@@ -130,7 +138,7 @@ replay retains a letter selection. Numbered put replay advances one slot,
 stopping at 9, even when an empty slot causes an error. A register prefix
 on dot overrides the saved selection. Ex yank/put accept an optional register
 argument. System clipboard is not implemented; ex edits and r/R do not
-update the unnamed register yet.
+update the unnamed register.
 Uppercase letter writes append stored line records, preserving an LF
 between writes. Mixed character/line writes are allowed; the latest write
 determines whether the combined register is characterwise or linewise.
@@ -260,7 +268,7 @@ Resize preserves quoting; unsupported special keys keep waiting. Paste
 cancels pending quoting and is rejected. No numeric character-code input
 or literal CR. Normal-mode r also supports quoting its replacement.
 . repeats the last successful visual text edit at the current cursor.
-It covers Insert/change/Replace sessions, d/dd/D/x, r, J and p/P. 3.
+It covers Insert/change/Replace sessions, d/dd/D/x/X, s/S, r, J and p/P. 3.
 replaces the saved count, rather than multiplying it; a successful counted
 repeat keeps that count for the next dot. For changes it replaces the
 selection count and types the input once. i/a/I/A repeat only the first

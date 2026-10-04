@@ -231,3 +231,58 @@ fn substitute_empty_or_cancelled_session_preserves_registers_and_history() {
     );
     assert_eq!(editor, before);
 }
+
+#[test]
+fn percent_matches_ascii_brackets_and_composes_with_operators() {
+    use vir::editor::Register;
+    use vir::visual::Motion;
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("a (one [two]) z\nnext\n").unwrap());
+    let mut state = VisualState::default();
+    state.column = 0;
+    state.match_bracket(editor.buffer()).unwrap();
+    assert_eq!(state.column, 12);
+    state.column = 0;
+    state
+        .delete_motion(&mut editor, Motion::MatchBracket, None)
+        .unwrap();
+    assert_eq!(editor.buffer().to_text(), " z\nnext\n");
+    assert_eq!(
+        editor.numbered_register(1),
+        Some(&Register::Characters("a (one [two])".into()))
+    );
+    editor.undo().unwrap();
+    state.column = 4;
+    state.match_bracket(editor.buffer()).unwrap();
+    assert_eq!(state.column, 11);
+    state.column = 0;
+    let before = editor.clone();
+    assert!(
+        state
+            .match_bracket(&TextBuffer::from_text("plain\n").unwrap())
+            .is_err()
+    );
+    assert_eq!(editor, before);
+}
+
+#[test]
+fn percent_ignores_non_ascii_and_unmatched_brackets_without_editing() {
+    use vir::visual::Motion;
+    for text in ["中 (x)\n", "( [ ]\n"] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text(text).unwrap());
+        let mut state = VisualState::default();
+        state.column = 0;
+        if text.starts_with('中') {
+            state.match_bracket(editor.buffer()).unwrap();
+            assert_eq!(state.column, 4);
+        } else {
+            assert!(state.match_bracket(editor.buffer()).is_err());
+            let before = editor.clone();
+            assert!(
+                state
+                    .delete_motion(&mut editor, Motion::MatchBracket, None)
+                    .is_err()
+            );
+            assert_eq!(editor, before);
+        }
+    }
+}

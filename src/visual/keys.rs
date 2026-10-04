@@ -351,6 +351,7 @@ impl NormalPrefix {
                 }
                 Ok(PrefixAction::Insert(mode, count))
             }
+            KeyCode::Char('%') => Ok(PrefixAction::Move(Motion::MatchBracket, count)),
             KeyCode::Char('X') => Ok(PrefixAction::DeleteBefore(count)),
             KeyCode::Char('S') => Ok(PrefixAction::Operate(Operator::Change, None, Some(count))),
             KeyCode::Char('Y') => Ok(PrefixAction::Operate(Operator::Yank, None, Some(count))),
@@ -378,6 +379,7 @@ pub(super) fn normal_motion(key: KeyEvent) -> Option<Motion> {
         };
     }
     match key.code {
+        KeyCode::Char('%') => Some(Motion::MatchBracket),
         KeyCode::Char('W') => Some(Motion::BigWordForward),
         KeyCode::Char('B') => Some(Motion::BigWordBackward),
         KeyCode::Char('E') => Some(Motion::BigWordEnd),
@@ -499,6 +501,7 @@ mod tests {
             ('s', PrefixAction::Insert('s', 3)),
             ('S', PrefixAction::Operate(Operator::Change, None, Some(3))),
             ('Y', PrefixAction::Operate(Operator::Yank, None, Some(3))),
+            ('%', PrefixAction::Move(Motion::MatchBracket, 3)),
             ('C', PrefixAction::Insert('C', 3)),
         ] {
             let mut prefix = NormalPrefix::default();
@@ -512,6 +515,9 @@ mod tests {
                 prefix.key(key('x')),
                 Ok(PrefixAction::DeleteCharacters(Some(1)))
             );
+            if alias == '%' {
+                continue;
+            }
             for operator in ['d', 'c', 'y'] {
                 prefix.key(key(operator)).unwrap();
                 assert!(prefix.key(key(alias)).is_err());

@@ -8,6 +8,7 @@ mod keys;
 mod line_undo;
 mod macro_input;
 pub use input::InputSession;
+mod matching;
 mod motion;
 mod operator;
 mod paste;
@@ -23,6 +24,7 @@ use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
+    MatchBracket,
     Mark {
         name: char,
         linewise: bool,
@@ -194,6 +196,10 @@ impl VisualState {
             }
             Motion::Mark { name, linewise } => {
                 let _ = self.jump_mark(buffer, name, linewise);
+                return;
+            }
+            Motion::MatchBracket => {
+                let _ = self.match_bracket(buffer);
                 return;
             }
             Motion::Left => self.column = self.column.saturating_sub(steps),

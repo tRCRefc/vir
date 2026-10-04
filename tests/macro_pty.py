@@ -70,6 +70,20 @@ def case(directory, name, registers, initial, actions, expected):
 
 with tempfile.TemporaryDirectory(prefix="vir-macro-") as temporary:
     directory = Path(temporary)
+    case(directory, "percent-jump", [('a', "%", False)], "a (x) b",
+        [(b"3@a", b"2/2  col 5")], "a (x) b")
+    case(directory, "percent-delete", [('a', "d%", False)], "a (x) b",
+        [(b"@a", None)], " b")
+    case(directory, "percent-backward", [('a', "$%", False)], "(x)",
+        [(b"@a", b"2/2  col 1")], "(x)")
+    case(directory, "percent-change-dot", [('a', '9c%X\x1b', False)], "(one) [two] end",
+        [(b"@aw2.", None)], "X X end")
+    case(directory, "percent-yank", [('a', '"by%"bP', False)], "(x)",
+        [(b"@a", None)], "(x)(x)")
+    case(directory, "percent-multiline-undo", [('a', "d%", False)], "{\nx\n}\ntail",
+        [(b"@au", None)], "{\nx\n}\ntail")
+    case(directory, "percent-error-stops-macro", [('a', "%rZ", False)], "plain",
+        [(b"@a", b"no matching bracket"), (b"rX", None)], "Xlain")
     case(directory, "alias-X", [('a', 'lll"b2X"bP', False)], "abcdef",
         [(b"@a", None)], "abcdef")
     case(directory, "alias-s", [('a', '2sX\x1b', False)], "abcdef",

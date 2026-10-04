@@ -706,6 +706,12 @@ fn run_session(editor: &mut Editor, recovery: &mut Recovery) -> io::Result<()> {
                         }
                         continue;
                     }
+                    Ok(PrefixAction::Move(super::Motion::MatchBracket, _)) => {
+                        if let Err(error) = state.match_bracket(editor.buffer()) {
+                            command.error(error);
+                        }
+                        continue;
+                    }
                     Ok(PrefixAction::Move(motion, count)) => {
                         state.move_counted(motion, Some(count), editor.buffer(), height);
                         continue;
