@@ -522,3 +522,62 @@ fn backward_word_change_keeps_numbered_history_after_range_normalization() {
         );
     }
 }
+
+#[test]
+fn rejected_put_preserves_editor_view_and_repeat_recipe() {
+    for register in [
+        Register::Lines(vec![]),
+        Register::Lines(vec!["x".repeat(65_536)]),
+        Register::Lines(vec![String::new(); 11]),
+        Register::Characters("中".repeat(4)),
+    ] {
+        for before in [false, true] {
+            let mut editor = Editor::from_buffer(TextBuffer::from_text("abc\n").unwrap());
+            let mut state = VisualState::default();
+            state.replace_character(&mut editor, 'Z').unwrap();
+            editor
+                .set_named_register('a', register.clone(), false)
+                .unwrap();
+            let saved_editor = editor.clone();
+            let saved_view = format!("{state:?}");
+            let count = if matches!(&register, Register::Lines(lines) if lines.is_empty()) {
+                1
+            } else {
+                100_000
+            };
+            assert!(
+                state
+                    .put_selected(&mut editor, before, count, Some('a'))
+                    .is_err()
+            );
+            assert_eq!(editor, saved_editor);
+            assert_eq!(format!("{state:?}"), saved_view);
+            state.column = 1;
+            state.repeat_change(&mut editor, None).unwrap();
+            assert_eq!(editor.buffer().to_text(), "ZZc\n");
+        }
+    }
+}
+
+#[test]
+fn put_budget_applies_to_dot_and_counts_utf8_and_empty_lines() {
+    for register in [
+        Register::Characters("中".into()),
+        Register::Lines(vec!["中".into(), String::new()]),
+    ] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("abc\n").unwrap());
+        editor.set_named_register('a', register, false).unwrap();
+        let mut state = VisualState::default();
+        state.put_selected(&mut editor, true, 1, Some('a')).unwrap();
+        let saved = editor.clone();
+        let view = format!("{state:?}");
+        assert_eq!(
+            state.repeat_change(&mut editor, Some(1_000_000)),
+            Err("paste too large".into())
+        );
+        assert_eq!(editor, saved);
+        assert_eq!(format!("{state:?}"), view);
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "abc\n");
+    }
+}

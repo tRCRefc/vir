@@ -9,6 +9,20 @@ use crate::{
     editor::{Editor, Register, TextEdit},
 };
 
+// Bound automatic register expansion, including empty lines and line separators.
+const MAX_PUT_WORK: usize = 1_000_000;
+
+fn check_put_work(work: Option<usize>, count: usize) -> Result<(), String> {
+    if work
+        .and_then(|work| work.checked_mul(count))
+        .is_none_or(|work| work > MAX_PUT_WORK)
+    {
+        Err("paste too large".into())
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Operator {
     Delete,
@@ -470,6 +484,7 @@ impl VisualState {
                 if text.is_empty() {
                     return Err("register is empty".into());
                 }
+                check_put_work(Some(text.len()), count)?;
                 let capacity = text.len().checked_mul(count).ok_or("paste too large")?;
                 let mut repeated = String::new();
                 repeated
@@ -495,6 +510,15 @@ impl VisualState {
                 self.finish_insert(edit.commit()?);
             }
             Register::Lines(lines) => {
+                if lines.is_empty() {
+                    return Err("register is empty".into());
+                }
+                check_put_work(
+                    lines.iter().try_fold(0usize, |total, line| {
+                        total.checked_add(line.len())?.checked_add(1)
+                    }),
+                    count,
+                )?;
                 let capacity = lines.len().checked_mul(count).ok_or("paste too large")?;
                 let mut repeated = Vec::new();
                 repeated
