@@ -64,6 +64,13 @@ $1 is literal. Only '/' substitution delimiters and the 'g' flag work.
 File command paths are literal (spaces allowed); no glob/shell expansion.
 
 Behavior and limits:
+- Files use UTF-8/LF; CR bytes are rejected. Loading and saving without edits
+  preserve the final LF. Character edits in an existing nonempty buffer,
+  join and move/copy preserve its final-LF convention. Whole-line insertion
+  (including o/O, line-register put and read) and ex change/substitute add a
+  final LF to nonempty results; substitution does so even on a nonfinal line.
+  First text input into an empty buffer adds a final LF; deleting all lines
+  leaves an empty file.
 - Full writes clear the modified flag; partial writes do not. Exporting a
   full buffer to another path clears modified but keeps the current name.
 - Partial writes cannot replace the current file. Other existing export
