@@ -1,15 +1,17 @@
 use std::env;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() == 2 && matches!(args[1].as_str(), "--help" | "-h") {
+    let args: Vec<OsString> = env::args_os().collect();
+    let mode = args.get(1).and_then(|arg| arg.to_str());
+    if args.len() == 2 && matches!(mode, Some("--help" | "-h")) {
         print!("{}", include_str!("help.txt"));
         return;
     }
-    if args.get(1).map(String::as_str) == Some("--recover-list") {
+    if mode == Some("--recover-list") {
         let result = (|| -> io::Result<()> {
             if args.len() > 3 {
                 return Err(io::Error::other("Usage: vir --recover-list [directory]"));
@@ -38,7 +40,7 @@ fn main() {
         }
         return;
     }
-    if let Some(mode @ ("--vi" | "--ex")) = args.get(1).map(String::as_str) {
+    if let Some(mode @ ("--vi" | "--ex")) = mode {
         if let Err(error) = run_editor(mode, &args[2..]) {
             eprintln!("{mode}: {error}");
             std::process::exit(1);
@@ -48,15 +50,15 @@ fn main() {
     if args.len() != 3 {
         eprintln!(
             "Usage: {} --ex [file ...] (legacy: <unused-opt> <filename>)",
-            args[0]
+            Path::new(&args[0]).display()
         );
         std::process::exit(1);
     }
     let _opt = &args[1];
-    let file_path = &args[2];
+    let file_path = Path::new(&args[2]);
 
     let f = File::open(file_path).unwrap_or_else(|error| {
-        eprintln!("Unable to Open File {}: {}", file_path, error);
+        eprintln!("Unable to Open File {}: {}", file_path.display(), error);
         std::process::exit(1);
     });
 
@@ -65,16 +67,16 @@ fn main() {
         match line {
             Ok(line) => println!("{line}"),
             Err(error) => {
-                eprintln!("Unable to read file {file_path}: {error}");
+                eprintln!("Unable to read file {}: {error}", file_path.display());
                 std::process::exit(1);
             }
         }
     }
 }
 
-fn run_editor(mode: &str, args: &[String]) -> io::Result<()> {
+fn run_editor(mode: &str, args: &[OsString]) -> io::Result<()> {
     let mut editor = vir::editor::Editor::default();
-    if args.first().map(String::as_str) == Some("--recover") {
+    if args.first().is_some_and(|arg| arg == "--recover") {
         if args.len() != 2 {
             return Err(io::Error::other("Usage: vir --vi|--ex --recover SNAPSHOT"));
         }
