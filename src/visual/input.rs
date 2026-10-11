@@ -271,18 +271,12 @@ impl<'a> InputSession<'a> {
                 InputAction::ReplaceText(text) | InputAction::ReplaceTyped(text) => {
                     if let Some((head, tail)) = text.split_once('\n') {
                         let unit = format!("{}{head}", self.prefix);
-                        if matches!(action, InputAction::ReplaceTyped(_)) {
-                            self.edit.replace_typed_text(head)?;
-                        } else {
-                            self.edit.replace_input_text(head)?;
-                        }
-                        self.edit
-                            .insert_replace_copies(&unit.repeat(self.remaining - 1))?;
-                        if matches!(action, InputAction::ReplaceTyped(_)) {
-                            self.edit.replace_typed_text(&format!("\n{tail}"))?;
-                        } else {
-                            self.edit.replace_input_text(&format!("\n{tail}"))?;
-                        }
+                        self.edit.replace_counted_newline(
+                            head,
+                            &unit.repeat(self.remaining - 1),
+                            &format!("\n{tail}"),
+                            matches!(action, InputAction::ReplaceTyped(_)),
+                        )?;
                         self.prefix.clear();
                         self.remaining = 1;
                     } else {

@@ -159,6 +159,29 @@ impl TextEdit<'_> {
         self.write_replace_text(text, false)
     }
 
+    /// The first counted R newline is one event, including its inserted copies.
+    pub(crate) fn replace_counted_newline(
+        &mut self,
+        head: &str,
+        copies: &str,
+        tail: &str,
+        typed: bool,
+    ) -> Result<(), String> {
+        self.atomic_input(|edit| {
+            if typed {
+                edit.replace_typed_text(head)?;
+            } else {
+                edit.replace_input_text(head)?;
+            }
+            edit.insert_replace_copies(copies)?;
+            if typed {
+                edit.replace_typed_text(tail)
+            } else {
+                edit.replace_input_text(tail)
+            }
+        })
+    }
+
     fn write_replace_text(&mut self, text: &str, overwrite: bool) -> Result<(), String> {
         self.apply_replace_text(text, overwrite)?;
         if !text.is_empty() && self.input_actions.is_some() {
@@ -478,6 +501,13 @@ impl TextEdit<'_> {
                 self.insert_literal(text)
             };
         }
+        self.atomic_input(|edit| edit.apply_indented_text(text, replace))
+    }
+
+    fn atomic_input(
+        &mut self,
+        apply: impl FnOnce(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
         // A rejected expansion must leave the entire key/action untouched.
         let saved = (
             self.draft.clone(),
@@ -486,8 +516,9 @@ impl TextEdit<'_> {
             self.replacements.clone(),
             self.indent,
             self.indent_work,
+            self.input_actions.clone(),
         );
-        let result = self.apply_indented_text(text, replace);
+        let result = apply(self);
         if result.is_err() {
             (
                 self.draft,
@@ -496,6 +527,7 @@ impl TextEdit<'_> {
                 self.replacements,
                 self.indent,
                 self.indent_work,
+                self.input_actions,
             ) = saved;
         }
         result
@@ -523,15 +555,24 @@ impl TextEdit<'_> {
                 indent_width(&prefix)
             });
             let start = self.cursor;
+            let overwritten = if replace {
+                self.draft
+                    .line(start.row)
+                    .unwrap_or("")
+                    .chars()
+                    .nth(start.column)
+            } else {
+                None
+            };
             let tail: String = self
                 .draft
                 .line(start.row)
                 .unwrap_or("")
                 .chars()
-                .skip(start.column + usize::from(replace))
+                .skip(start.column + usize::from(overwritten.is_some()))
                 .take_while(|c| matches!(c, ' ' | '\t'))
                 .collect();
-            let consumed = usize::from(replace) + tail.chars().count();
+            let consumed = usize::from(overwritten.is_some()) + tail.chars().count();
             let generated = self.generated_text(width)?;
             self.cursor = self
                 .draft
@@ -546,7 +587,11 @@ impl TextEdit<'_> {
                 .map_err(str::to_owned)?;
             self.crossed_lines = true;
             if replace {
-                self.replacements.push((start, self.cursor, tail, false));
+                let old = format!(
+                    "{}{tail}",
+                    overwritten.map_or_else(String::new, |c| c.to_string())
+                );
+                self.replacements.push((start, self.cursor, old, false));
             }
             self.indent = Some(GeneratedIndent {
                 row: self.cursor.row,

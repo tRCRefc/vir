@@ -133,3 +133,71 @@ fn dropped_replace_preserves_history_but_completed_erasure_replaces_it() {
     state.repeat_change(&mut editor, None).unwrap();
     assert_eq!(editor.buffer().to_text(), "Zbc");
 }
+
+#[test]
+fn autoindent_replace_newlines_at_end_empty_and_short_lines() {
+    for original in ["a\n", "\n", "", "a"] {
+        for count in [1, 2, 3] {
+            let mut editor = editor(original);
+            editor.set_autoindent(true);
+            let mut state = VisualState::default();
+            let mut input = state.begin_counted_insert(&mut editor, 'R', count).unwrap();
+            input.apply_input(&InputAction::Replace('X')).unwrap();
+            input.apply_input(&InputAction::Replace('\n')).unwrap();
+            let expected = format!(
+                "{}{}",
+                "X".repeat(count),
+                if original == "a" { "\n" } else { "\n\n" }
+            );
+            assert_eq!(input.buffer().to_text(), expected);
+            input.apply_input(&InputAction::Replace('\n')).unwrap();
+            input.apply_input(&InputAction::Replace('Y')).unwrap();
+            input.commit(&mut state).unwrap();
+            let result = format!("{}\n\nY\n", "X".repeat(count));
+            // A non-LF-terminated original keeps its tail convention.
+            let result = if original == "a" {
+                result.trim_end_matches('\n').to_owned()
+            } else {
+                result
+            };
+            assert_eq!(editor.buffer().to_text(), result);
+            editor.undo().unwrap();
+            assert_eq!(editor.buffer().to_text(), original);
+            state.row = 0;
+            state.column = 0;
+            state.repeat_change(&mut editor, None).unwrap();
+            assert_eq!(editor.buffer().to_text(), result);
+        }
+    }
+}
+
+#[test]
+fn counted_replace_newline_indent_failure_rolls_back_head_and_copies() {
+    let original = format!("{}ab\n", "\t".repeat(1_000_001));
+    let mut editor = editor(&original);
+    editor.set_autoindent(true);
+    let mut state = VisualState::default();
+    state.column = 1_000_001;
+    let mut input = state.begin_counted_insert(&mut editor, 'R', 2).unwrap();
+    let cursor = input.cursor();
+    assert_eq!(
+        input.apply_input(&InputAction::ReplaceTyped("X\n".into())),
+        Err("input repeat too large".into())
+    );
+    assert_eq!(input.buffer().to_text(), original);
+    assert_eq!(input.cursor(), cursor);
+    input.apply_input(&InputAction::Replace('Y')).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(
+        editor.buffer().to_text(),
+        format!("{}YYb\n", "\t".repeat(1_000_001))
+    );
+    editor.undo().unwrap();
+    assert_eq!(editor.buffer().to_text(), original);
+    state.column = 1_000_001;
+    state.repeat_change(&mut editor, None).unwrap();
+    assert_eq!(
+        editor.buffer().to_text(),
+        format!("{}YYb\n", "\t".repeat(1_000_001))
+    );
+}
