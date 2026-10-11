@@ -581,3 +581,26 @@ fn put_budget_applies_to_dot_and_counts_utf8_and_empty_lines() {
         assert_eq!(editor.buffer().to_text(), "abc\n");
     }
 }
+
+#[test]
+fn unnamed_and_numbered_put_preflight_preserves_history_and_dot_selection() {
+    for numbered in [false, true] {
+        let mut editor = Editor::from_buffer(TextBuffer::from_text("large\nkeep\n").unwrap());
+        let mut state = VisualState::default();
+        if numbered {
+            state.delete_lines(&mut editor, 1).unwrap();
+        } else {
+            state.yank(&mut editor, None, Some(1)).unwrap();
+        }
+        let saved = editor.clone();
+        let view = format!("{state:?}");
+        let result = if numbered {
+            state.put_numbered(&mut editor, false, 1_000_000, 1)
+        } else {
+            state.put(&mut editor, false, 1_000_000)
+        };
+        assert_eq!(result, Err("paste too large".into()));
+        assert_eq!(editor, saved);
+        assert_eq!(format!("{state:?}"), view);
+    }
+}

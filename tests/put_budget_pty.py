@@ -1,4 +1,5 @@
 """Reject counted put under a fixed Unix address-space limit; run after cargo build."""
+import json
 import fcntl
 import os
 from pathlib import Path
@@ -49,4 +50,21 @@ if __name__ == "__main__":
                 process.wait()
             os.close(master)
             os.close(slave)
-    print("put budget under 128 MiB PTY passed")
+    build = subprocess.run(
+        ["cargo", "test", "--test", "put_allocation", "--no-run", "--offline", "--locked", "--message-format=json"],
+        cwd=BINARY.parents[2], capture_output=True, text=True, check=True,
+    )
+    executable = next(
+        item["executable"] for line in build.stdout.splitlines()
+        if (item := json.loads(line)).get("reason") == "compiler-artifact"
+        and item.get("target", {}).get("name") == "put_allocation" and item.get("executable")
+    )
+    for mode in ["characters", "lines", "dot-characters", "dot-lines"]:
+        result = subprocess.run(
+            [executable, "--exact", "oversized_source_is_rejected_before_copying", "--ignored"],
+            env=dict(os.environ, VIR_PUT_PROBE=mode), preexec_fn=limit_memory,
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, (mode, result.returncode, result.stdout, result.stderr)
+        assert "1 passed" in result.stdout, result.stdout
+    print("put budget under 128 MiB: PTY and four oversized-source API cases passed")

@@ -23,6 +23,43 @@ fn check_put_work(work: Option<usize>, count: usize) -> Result<(), String> {
     }
 }
 
+fn validate_put_register(register: &Register, count: usize) -> Result<(), String> {
+    let work = match register {
+        Register::Characters(text) => {
+            if text.is_empty() {
+                return Err("register is empty".into());
+            }
+            Some(text.len())
+        }
+        Register::Lines(lines) => {
+            if lines.is_empty() {
+                return Err("register is empty".into());
+            }
+            lines.iter().try_fold(0usize, |total, line| {
+                total.checked_add(line.len())?.checked_add(1)
+            })
+        }
+    };
+    check_put_work(work, count.max(1))
+}
+
+/// Borrow and preflight before callers copy a register or stage the Editor.
+pub(super) fn put_source(
+    editor: &Editor,
+    selected: Option<char>,
+    count: usize,
+) -> Result<&Register, String> {
+    let register = match selected {
+        Some(name @ ('a'..='z' | 'A'..='Z')) => editor.named_register(name),
+        Some(name @ '1'..='9') => editor.numbered_register((name as u8 - b'0') as usize),
+        Some(_) => return Err("invalid register".into()),
+        None => editor.unnamed_register(),
+    }
+    .ok_or("register is empty")?;
+    validate_put_register(register, count)?;
+    Ok(register)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Operator {
     Delete,
@@ -401,10 +438,7 @@ impl VisualState {
     }
 
     pub fn put(&mut self, editor: &mut Editor, before: bool, count: usize) -> Result<(), String> {
-        let register = editor
-            .unnamed_register()
-            .ok_or("register is empty")?
-            .clone();
+        let register = put_source(editor, None, count)?.clone();
         self.put_register(editor, before, count, &register)
     }
 
@@ -415,21 +449,7 @@ impl VisualState {
         count: usize,
         selected: Option<char>,
     ) -> Result<(), String> {
-        let register = match selected {
-            Some(name @ 'a'..='z') | Some(name @ 'A'..='Z') => editor
-                .named_register(name)
-                .ok_or("register is empty")?
-                .clone(),
-            Some(name @ '1'..='9') => editor
-                .numbered_register((name as u8 - b'0') as usize)
-                .ok_or("register is empty")?
-                .clone(),
-            Some(_) => return Err("invalid register".into()),
-            None => editor
-                .unnamed_register()
-                .ok_or("register is empty")?
-                .clone(),
-        };
+        let register = put_source(editor, selected, count)?.clone();
         self.put_register(editor, before, count, &register)?;
         if let Some(register) = selected {
             self.last_change = Some(ChangeRecord::PutNamed {
@@ -450,8 +470,9 @@ impl VisualState {
     ) -> Result<(), String> {
         let register = editor
             .numbered_register(number)
-            .ok_or("register is empty")?
-            .clone();
+            .ok_or("register is empty")?;
+        validate_put_register(register, count)?;
+        let register = register.clone();
         self.put_register(editor, before, count, &register)?;
         if (1..=9).contains(&number) {
             self.last_change = Some(ChangeRecord::PutNamed {
@@ -481,10 +502,6 @@ impl VisualState {
         let count = count.max(1);
         match register {
             Register::Characters(text) => {
-                if text.is_empty() {
-                    return Err("register is empty".into());
-                }
-                check_put_work(Some(text.len()), count)?;
                 let capacity = text.len().checked_mul(count).ok_or("paste too large")?;
                 let mut repeated = String::new();
                 repeated
@@ -510,15 +527,6 @@ impl VisualState {
                 self.finish_insert(edit.commit()?);
             }
             Register::Lines(lines) => {
-                if lines.is_empty() {
-                    return Err("register is empty".into());
-                }
-                check_put_work(
-                    lines.iter().try_fold(0usize, |total, line| {
-                        total.checked_add(line.len())?.checked_add(1)
-                    }),
-                    count,
-                )?;
                 let capacity = lines.len().checked_mul(count).ok_or("paste too large")?;
                 let mut repeated = Vec::new();
                 repeated

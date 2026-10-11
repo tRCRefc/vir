@@ -413,6 +413,17 @@ impl VisualState {
         if let Some(count) = count {
             change.override_count(count);
         }
+        match &change {
+            ChangeRecord::Put { count, .. } => {
+                super::operator::put_source(editor, None, *count)?;
+            }
+            ChangeRecord::PutNamed {
+                count, register, ..
+            } => {
+                super::operator::put_source(editor, Some(*register), *count)?;
+            }
+            _ => {}
+        }
         let mut staged_editor = editor.clone();
         let mut staged_state = self.clone();
         change.apply(&mut staged_state, &mut staged_editor)?;
