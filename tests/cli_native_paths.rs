@@ -104,12 +104,18 @@ fn native_visual_path_reaches_terminal_validation() {
     let dir = tempfile::tempdir().unwrap();
     let file = native_path(dir.path(), b"visual-\xff");
     fs::write(&file, "original\n").unwrap();
-    let result = run(&[OsStr::new("--vi"), file.as_os_str()], dir.path(), b"");
-    assert_eq!(result.status.code(), Some(1));
-    assert!(
-        String::from_utf8(result.stderr)
-            .unwrap()
-            .contains("requires a terminal")
-    );
-    assert_eq!(fs::read(&file).unwrap(), b"original\n");
+    for args in [
+        vec![OsStr::new("--vi"), file.as_os_str()],
+        vec![file.as_os_str()],
+    ] {
+        let result = run(&args, dir.path(), b"");
+        assert_eq!(result.status.code(), Some(1));
+        assert!(result.stdout.is_empty());
+        assert!(
+            String::from_utf8(result.stderr)
+                .unwrap()
+                .contains("requires a terminal")
+        );
+        assert_eq!(fs::read(&file).unwrap(), b"original\n");
+    }
 }

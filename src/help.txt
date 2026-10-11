@@ -1,15 +1,18 @@
 vir - basic ex editor and visual frontend
 
 Usage:
+  vir [file]           Edit visually; no file starts an empty, unnamed buffer
   vir --ex [file ...]   Edit UTF-8/LF files; missing files start empty
-  vir --vi [file]      Open a file in a terminal
+  vir --vi [file]      Edit visually (same as vir [file])
   vir --recover-list [directory]  List recovery snapshots (default: cwd or VIR_RECOVERY_DIR)
   vir --vi --recover SNAPSHOT     Recover text into an unnamed visual buffer
   vir --ex --recover SNAPSHOT     Recover text into an unnamed ex buffer
   vir --help           Show this help
   vir -h               Show this help
 
-Commands are entered without a leading colon. A ':' prompt appears only
+For a filename starting with '-', use a path such as ./-notes.txt.
+
+In --ex mode, commands are entered without a leading colon. A ':' prompt appears only
 when stdin and stdout are terminals; piped sessions have no prompt.
 
   [range]p / nu         Print lines / print with line numbers
@@ -96,9 +99,9 @@ Behavior and limits:
   replacement is provided.
 
 Legacy: vir <unused-opt> <filename> prints a file without editing it.
-This old two-argument entry point is retained; use --ex for editing.
+This old two-argument entry point is retained; use vir [file] or --ex for editing.
 
-Visual frontend (--vi): requires terminal stdin and stdout. Use hjkl or
+Visual frontend (vir [file] or --vi): requires terminal stdin and stdout. Use hjkl or
 arrow keys, 0/$ (Home/End), g/G (first/last line), PageUp/PageDown or
 Ctrl-B/Ctrl-F. In normal mode, q or Ctrl-C checks for unsaved changes
 before exiting. i inserts before the cursor, a after it, o opens a line

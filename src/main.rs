@@ -47,9 +47,16 @@ fn main() {
         }
         return;
     }
+    if args.len() == 1 || (args.len() == 2 && !args[1].as_encoded_bytes().starts_with(b"-")) {
+        if let Err(error) = run_editor("--vi", &args[1..]) {
+            eprintln!("--vi: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.len() != 3 {
         eprintln!(
-            "Usage: {} --ex [file ...] (legacy: <unused-opt> <filename>)",
+            "Usage: {} [file] | --vi [file] | --ex [file ...] | --help (legacy: <unused-opt> <filename>)",
             Path::new(&args[0]).display()
         );
         std::process::exit(1);

@@ -242,6 +242,7 @@ fn help_explains_supported_workflow_without_starting_editor() {
         assert!(output.status.success());
         assert!(output.stderr.is_empty());
         let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("vir [file]"));
         assert!(text.contains("vir --ex [file ...]"));
         assert!(text.contains("EOF exits without saving"));
         assert!(text.contains("not historical vi BRE"));
@@ -284,4 +285,42 @@ fn visual_rejects_pipes_and_extra_files_without_terminal_sequences() {
         assert!(output.stdout.is_empty());
         assert!(!output.stderr.contains(&0x1b));
     }
+}
+
+#[test]
+fn bare_file_requires_a_terminal_without_changing_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.txt");
+    std::fs::write(&path, "original\n").unwrap();
+    let output = run(&[path.to_str().unwrap()], b"iunexpected\x1b:wq\n");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.contains(&0x1b));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("requires a terminal")
+    );
+    assert_eq!(std::fs::read(path).unwrap(), b"original\n");
+}
+
+#[test]
+fn no_arguments_start_visual_mode_and_require_a_terminal() {
+    let output = run(&[], b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.contains(&0x1b));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("requires a terminal")
+    );
+}
+
+#[test]
+fn unknown_option_still_reports_usage() {
+    let output = run(&["--unknown-option"], b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr).unwrap().contains("Usage:"));
 }

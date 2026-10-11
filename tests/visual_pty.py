@@ -1078,7 +1078,57 @@ def manual_indent_session(directory):
         os.close(slave)
 
 
+def bare_file_session(directory, name, initial):
+    path = directory / (name if name is not None else "unnamed-saved.txt")
+    if initial is not None:
+        path.write_bytes(initial)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 80, 0, 0))
+    original = termios.tcgetattr(slave)
+    arguments = [] if name is None else ["./" + name if name.startswith("-") else name]
+    process = subprocess.Popen(
+        [str(BINARY), *arguments], cwd=directory,
+        stdin=slave, stdout=slave, stderr=subprocess.PIPE,
+        env={**os.environ, "VIR_RECOVERY_DIR": str(directory)},
+    )
+    try:
+        data = receive(master, b"[VIEW]")
+        assert b"\x1b[?1049h" in data
+        assert not termios.tcgetattr(slave)[3] & termios.ICANON
+        if name is None:
+            os.write(master, b":w\r")
+            receive(master, b"? no file name")
+            assert not path.exists()
+        os.write(master, b"i")
+        receive(master, b"[INSERT]")
+        os.write(master, b"added ")
+        receive(master, b"added")
+        os.write(master, b"\x1b")
+        receive(master, b"[VIEW]")
+        command = b":wq unnamed-saved.txt\r" if name is None else b":wq\r"
+        os.write(master, command)
+        assert process.wait(timeout=5) == 0
+        receive(master, b"\x1b[?1049l")
+        assert path.read_bytes() == b"added " + (initial or b"\n")
+        assert termios.tcgetattr(slave) == original
+        assert process.stderr.read() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 with tempfile.TemporaryDirectory(prefix="vir-visual-") as directory:
+    for name, initial in [
+        (None, None),
+        ("bare notes.txt", b"original\n"),
+        ("bare-new.txt", None),
+        (os.fsdecode(b"bare-native-\xff"), b"native\n"),
+        ("--recover", b"literal filename\n"),
+    ]:
+        bare_file_session(Path(directory), name, initial)
     manual_indent_session(Path(directory))
     character_find_session(Path(directory))
     newline_replace_undo_session(Path(directory))

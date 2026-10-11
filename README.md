@@ -2,7 +2,9 @@
 
 A small vi reimplementation in Rust, built as an exercise in understanding a classic editor. It provides modal editing, composable operators and motions, registers, macros, undo, dot repeat, and an ex frontend. It does not aim for complete historical vi/ex compatibility.
 
-This is a human–AI collaboration: the maintainer directs the project and makes scope decisions, while AI has written much of the implementation, tests, and documentation. See [AGENTS.md](AGENTS.md) for development guidelines.
+I did this project mainly for studying and exercising in sys-programming and rust. But I still used much of AI.Honestly, I feel like it's a bit like cheating in an exam, especially in such a project that aims for learning.Anyway, the project is done and any advice is welcomed. And I can claim I participated in the RIIR XD.
+
+This is a human–AI collaboration: the maintainer mainly directs the project and makes scope decisions, while AI has written much of the implementation, tests, and documentation. See [AGENTS.md](AGENTS.md) for development guidelines.
 
 ## Build and run
 
@@ -11,12 +13,15 @@ Requires Rust 1.88+ and Cargo. Visual mode requires terminal stdin and stdout; t
 ```sh
 cargo build --release --locked
 
-target/release/vir --vi notes.txt    # Visual editor
+target/release/vir notes.txt         # Visual editor
+target/release/vir --vi notes.txt    # Visual editor (explicit mode)
 target/release/vir --ex notes.txt    # Ex commands, including piped input
 target/release/vir --help            # Command reference
 ```
 
 To install locally, run `cargo install --path . --locked`, then use `vir`.
+Both `vir [file]` and `vir --vi [file]` edit in visual mode. Without a filename,
+`vir` and `vir --vi` start an empty, unnamed buffer; use `:w PATH` to save it.
 
 ## Basic editing
 
