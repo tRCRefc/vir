@@ -84,9 +84,46 @@ def rejected_change(directory, label, original, keys):
         os.close(slave)
 
 
+def undo_after_kill(directory, label, original, column, count):
+    path = directory / label
+    path.write_text(original)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    attributes = termios.tcgetattr(slave)
+    process = subprocess.Popen(
+        [str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave,
+        stderr=subprocess.PIPE, env=dict(os.environ, VIR_RECOVERY_DIR=str(directory)),
+    )
+    try:
+        receive(master, b"[VIEW]")
+        os.write(master, f"{column}l{count}i".encode() + b"\x15X\x1b")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b"u")
+        receive(master, b"col 1")
+        os.write(master, b"rZ")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b":wq\r")
+        receive(master, b"\x1b[?1049l")
+        assert process.wait(timeout=5) == 0
+        assert process.stderr.read() == b""
+        assert path.read_text() == "Z" + original[1:], (label, repr(path.read_text()))
+        assert termios.tcgetattr(slave) == attributes
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="vir-input-regression-") as name:
         directory = Path(name)
+        for original, column, label in [("old tail\n", 4, "ascii"),
+                                        ("中🙂 tail\n", 3, "unicode")]:
+            for count in [1, 3]:
+                undo_after_kill(directory, f"kill-undo-{label}-{count}",
+                                original, column, count)
         for original, label in [("", "empty"), ("\n", "blank")]:
             for command in ["cc", "S", "C"]:
                 rejected_change(directory, f"invalid-{label}-{command}", original,

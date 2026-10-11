@@ -748,17 +748,15 @@ impl TextEdit<'_> {
         if start_column == end.column {
             return Ok(());
         }
+        let start = Position {
+            row: end.row,
+            column: start_column,
+        };
         self.cursor = self
             .draft
-            .replace_text(
-                Position {
-                    row: end.row,
-                    column: start_column,
-                },
-                end,
-                "",
-            )
+            .replace_text(start, end, "")
             .map_err(str::to_owned)?;
+        self.undo_anchor = self.undo_anchor.min(start);
         self.record(InputAction::KillLine);
         Ok(())
     }

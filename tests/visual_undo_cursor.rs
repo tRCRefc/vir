@@ -145,3 +145,36 @@ fn save_preserves_anchor_reload_clears_it_and_failed_undo_is_atomic() {
     assert_eq!(editor, before);
     assert_eq!(format!("{state:?}"), visual);
 }
+
+#[test]
+fn ctrl_u_tracks_the_deleted_original_prefix_through_undo_redo_and_dot() {
+    for original in ["old tail\n", "中🙂 tail\n"] {
+        let column = original.find("tail").unwrap();
+        let column = original[..column].chars().count();
+        for count in [1, 3] {
+            let mut editor = Editor::from_buffer(TextBuffer::from_text(original).unwrap());
+            let mut state = VisualState::default();
+            state.column = column;
+            let mut input = state.begin_counted_insert(&mut editor, 'i', count).unwrap();
+            input.apply_input(&InputAction::KillLine).unwrap();
+            input.apply_input(&InputAction::Insert("X".into())).unwrap();
+            input.commit(&mut state).unwrap();
+            let edited = format!("{}tail\n", "X".repeat(count));
+            assert_eq!(editor.buffer().to_text(), edited);
+            state.move_cursor(Motion::End, editor.buffer(), 8);
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer().to_text(), original);
+            assert_eq!((state.row, state.column), (0, 0));
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer().to_text(), edited);
+            assert_eq!((state.row, state.column), (0, 0));
+            state.undo(&mut editor).unwrap();
+            state.column = column;
+            state.repeat_change(&mut editor, None).unwrap();
+            assert_eq!(editor.buffer().to_text(), edited);
+            state.undo(&mut editor).unwrap();
+            assert_eq!(editor.buffer().to_text(), original);
+            assert_eq!((state.row, state.column), (0, 0));
+        }
+    }
+}
