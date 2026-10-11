@@ -55,4 +55,4 @@ Terminal checks are in `tests/*_pty.py`; run them with Python 3 on Unix after bu
 
 ## License
 
-No license file is currently provided.
+Licensed under the [MIT License](LICENSE).
