@@ -95,3 +95,39 @@ fn ex_put_accepts_address_zero_and_empty_buffer() {
     assert!(run(&mut editor, "2put a").is_err());
     assert_eq!(editor, before);
 }
+
+#[test]
+fn public_yank_commands_reject_invalid_names_without_panic_or_state_changes() {
+    use vir::ex::command::{execute_with_lines, validate_addresses};
+    use vir::ex::parser::Command;
+    let mut editor = Editor::from_buffer(TextBuffer::from_text("one\ntwo\n").unwrap());
+    run(&mut editor, "/one/").unwrap();
+    editor.insert_lines(1, ["middle"]).unwrap();
+    editor
+        .set_named_register('a', Register::Characters("saved".into()), false)
+        .unwrap();
+    let before = editor.clone();
+    for name in ['1', '9', '!', '中', '\0'] {
+        let mut parsed = parse("/two/yank").unwrap();
+        parsed.command = Command::Yank {
+            register: Some(name),
+        };
+        assert_eq!(
+            validate_addresses(&parsed, &editor),
+            Err("invalid named register".into())
+        );
+        assert_eq!(
+            execute(parsed.clone(), &mut editor),
+            Err("invalid named register".into())
+        );
+        assert_eq!(editor, before);
+        assert_eq!(
+            execute_with_lines(parsed, &mut editor, &["unused".into()]),
+            Err("invalid named register".into())
+        );
+        assert_eq!(editor, before);
+        assert!(parse(&format!("yank {name}")).is_err());
+    }
+    editor.undo().unwrap();
+    assert_eq!(editor.buffer().to_text(), "one\ntwo\n");
+}

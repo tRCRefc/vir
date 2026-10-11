@@ -11,6 +11,10 @@ pub struct ResultValue {
 /// Validate addresses without changing editor state or consuming input.
 /// Explicit write ranges must name existing lines.
 pub fn validate_addresses(parsed: &ParsedCommand, editor: &Editor) -> Result<(), String> {
+    if matches!(parsed.command, Command::Yank { register: Some(name) } if !name.is_ascii_alphabetic())
+    {
+        return Err("invalid named register".into());
+    }
     let (parsed, _) = super::search::resolve(parsed.clone(), editor)?;
     let addressed = parsed.range.start.is_some() || parsed.range.end.is_some();
     match parsed.command {
@@ -456,7 +460,7 @@ fn execute_resolved(
                     | Command::Yank {
                         register: Some(name @ 'A'..='Z'),
                     } => editor.set_named_register(name, register, name.is_ascii_uppercase())?,
-                    _ => unreachable!(),
+                    _ => return Err("invalid named register".into()),
                 }
                 return Ok(ResultValue {
                     output: String::new(),
