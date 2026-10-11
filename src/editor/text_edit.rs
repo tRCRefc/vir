@@ -504,7 +504,7 @@ impl TextEdit<'_> {
         self.atomic_input(|edit| edit.apply_indented_text(text, replace))
     }
 
-    fn atomic_input(
+    pub(crate) fn atomic_input(
         &mut self,
         apply: impl FnOnce(&mut Self) -> Result<(), String>,
     ) -> Result<(), String> {
@@ -517,6 +517,7 @@ impl TextEdit<'_> {
             self.indent,
             self.indent_work,
             self.input_actions.clone(),
+            self.undo_anchor,
         );
         let result = apply(self);
         if result.is_err() {
@@ -528,6 +529,7 @@ impl TextEdit<'_> {
                 self.indent,
                 self.indent_work,
                 self.input_actions,
+                self.undo_anchor,
             ) = saved;
         }
         result

@@ -56,6 +56,14 @@ def saved_input(directory, label, original, setup, keys, expected):
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="vir-input-regression-") as name:
         directory = Path(name)
+        for label, keys, expected in [
+            ("ctrl-u", b"3iabc\x15X\x1b", "XXXtail\n"),
+            ("ctrl-w", b"3ione two\x17X\x1b", "one Xone Xone Xtail\n"),
+            ("ctrl-t", b"3i \x14X\x1b", "\tX\tX\tXtail\n"),
+            ("ctrl-d", b"3i \x14\x04X\x1b", "XXXtail\n"),
+            ("ctrl-u-lf", b"3iabc\x15X\rY\x1b", "XXX\nYtail\n"),
+        ]:
+            saved_input(directory, label, "tail\n", b"", keys, expected)
         for count in [1, 2, 3]:
             saved_input(directory, f"replace-{count}", "a\n", b":set ai\r",
                         f"{count}RX\rY\x1b".encode(), "X" * count + "\nY\n")

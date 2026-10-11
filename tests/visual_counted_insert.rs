@@ -235,3 +235,141 @@ fn no_op_replace_backspace_finishes_an_empty_session() {
     state.undo(&mut editor).unwrap();
     assert_eq!(editor.buffer().to_text(), "Zbc");
 }
+
+#[test]
+fn counted_corrections_repeat_net_first_segment_and_replay_at_each_entry() {
+    for mode in ['i', 'a', 'I', 'A'] {
+        for (typed, controls, unit) in [
+            ("abc", vec![InputAction::KillLine], "X"),
+            ("one two", vec![InputAction::WordBackspace], "one X"),
+            (" ", vec![InputAction::Forwardtab], "\tX"),
+            (
+                " ",
+                vec![InputAction::Forwardtab, InputAction::Backtab],
+                "X",
+            ),
+            ("中 字", vec![InputAction::WordBackspace], "中 X"),
+        ] {
+            for newline in [false, true] {
+                // Empty first line puts all four entry modes at the same gap.
+                let original = "\ntail\n";
+                let mut editor = editor(original);
+                let mut state = VisualState::default();
+                let mut input = state.begin_counted_insert(&mut editor, mode, 3).unwrap();
+                input
+                    .apply_input(&InputAction::Insert(typed.into()))
+                    .unwrap();
+                for action in &controls {
+                    input.apply_input(action).unwrap();
+                }
+                input
+                    .apply_input(&InputAction::Insert(
+                        if newline { "X\nY" } else { "X" }.into(),
+                    ))
+                    .unwrap();
+                input.commit(&mut state).unwrap();
+                let expected = format!(
+                    "{}{}\ntail\n",
+                    unit.repeat(3),
+                    if newline { "\nY" } else { "" }
+                );
+                assert_eq!(
+                    editor.buffer().to_text(),
+                    expected,
+                    "{mode}, {controls:?}, {newline}"
+                );
+                editor.undo().unwrap();
+                assert_eq!(editor.buffer().to_text(), original);
+                state.row = 0;
+                state.column = 0;
+                state.repeat_change(&mut editor, None).unwrap();
+                assert_eq!(editor.buffer().to_text(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn counted_kill_and_word_erase_original_text_only_once() {
+    for action in [InputAction::KillLine, InputAction::WordBackspace] {
+        let mut editor = editor("old tail\n");
+        let mut state = VisualState::default();
+        state.column = 4;
+        let mut input = state.begin_counted_insert(&mut editor, 'i', 3).unwrap();
+        input
+            .apply_input(&InputAction::Insert("abc".into()))
+            .unwrap();
+        input.apply_input(&action).unwrap();
+        input.apply_input(&action).unwrap();
+        input.apply_input(&InputAction::Insert("X".into())).unwrap();
+        input.commit(&mut state).unwrap();
+        assert_eq!(editor.buffer().to_text(), "XXXtail\n");
+        editor.undo().unwrap();
+        assert_eq!(editor.buffer().to_text(), "old tail\n");
+    }
+}
+
+#[test]
+fn counted_indent_expansion_failure_preserves_draft_and_pending_copies() {
+    let original = format!("{}tail\n", "\t".repeat(20));
+    let mut editor = editor(&original);
+    let mut state = VisualState::default();
+    state.column = 20;
+    let mut input = state
+        .begin_counted_insert(&mut editor, 'i', 50_000)
+        .unwrap();
+    let before = input.buffer().clone();
+    let cursor = input.cursor();
+    assert_eq!(
+        input.apply_input(&InputAction::Forwardtab),
+        Err("input repeat too large".into())
+    );
+    assert_eq!(input.buffer(), &before);
+    assert_eq!(input.cursor(), cursor);
+    input.apply_input(&InputAction::Insert("X".into())).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(
+        editor.buffer().to_text(),
+        format!("{}{}tail\n", "\t".repeat(20), "X".repeat(50_000))
+    );
+    editor.undo().unwrap();
+    assert_eq!(editor.buffer().to_text(), original);
+}
+
+#[test]
+fn counted_indent_normalization_repeats_new_whitespace_and_checks_later_text() {
+    let mut editor = editor("  tail\n");
+    let mut state = VisualState::default();
+    let mut input = state.begin_counted_insert(&mut editor, 'I', 3).unwrap();
+    input.apply_input(&InputAction::Forwardtab).unwrap();
+    input
+        .apply_input(&InputAction::Insert("X\nY".into()))
+        .unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(editor.buffer().to_text(), "\tX\tX\tX\nYtail\n");
+    editor.undo().unwrap();
+    assert_eq!(editor.buffer().to_text(), "  tail\n");
+
+    let original = format!("{}tail\n", "\t".repeat(8));
+    let mut editor = Editor::from_buffer(TextBuffer::from_text(&original).unwrap());
+    let mut state = VisualState::default();
+    state.column = 8;
+    let mut input = state
+        .begin_counted_insert(&mut editor, 'i', 100_000)
+        .unwrap();
+    input.apply_input(&InputAction::Forwardtab).unwrap();
+    let before = input.buffer().clone();
+    assert!(
+        input
+            .apply_input(&InputAction::Insert("XX".into()))
+            .is_err()
+    );
+    assert_eq!(input.buffer(), &before);
+    input.apply_input(&InputAction::Backtab).unwrap();
+    input.apply_input(&InputAction::Insert("X".into())).unwrap();
+    input.commit(&mut state).unwrap();
+    assert_eq!(
+        editor.buffer().to_text(),
+        format!("{}tail\n", format!("{}X", "\t".repeat(8)).repeat(100_000))
+    );
+}

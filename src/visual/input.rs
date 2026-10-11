@@ -251,6 +251,22 @@ impl<'a> InputSession<'a> {
             )?;
         }
         if self.remaining > 1 {
+            if let InputAction::Insert(text)
+            | InputAction::InsertLiteral(text)
+            | InputAction::ReplaceText(text)
+            | InputAction::ReplaceTyped(text) = action
+            {
+                let head = text
+                    .split_once('\n')
+                    .map_or(text.as_str(), |(head, _)| head);
+                check_work(
+                    self.prefix
+                        .len()
+                        .checked_add(head.len())
+                        .and_then(|n| n.checked_add(1)),
+                    self.remaining,
+                )?;
+            }
             match action {
                 InputAction::Insert(text) | InputAction::InsertLiteral(text) => {
                     if let Some((head, tail)) = text.split_once('\n') {
@@ -296,11 +312,51 @@ impl<'a> InputSession<'a> {
                 }
                 InputAction::Backspace => {
                     self.edit.backspace()?;
-                    self.prefix.pop();
+                    if self.edit.cursor() != position {
+                        self.prefix.pop();
+                    }
                 }
-                InputAction::WordBackspace => {
-                    self.edit.word_backspace()?;
-                    self.prefix.clear();
+                InputAction::WordBackspace | InputAction::KillLine => {
+                    if matches!(action, InputAction::WordBackspace) {
+                        self.edit.word_backspace()?;
+                    } else {
+                        self.edit.kill_line()?;
+                    }
+                    let erased = position.column.saturating_sub(self.edit.cursor().column);
+                    let keep = self.prefix.chars().count().saturating_sub(erased);
+                    self.prefix.truncate(
+                        self.prefix
+                            .char_indices()
+                            .nth(keep)
+                            .map_or(self.prefix.len(), |(byte, _)| byte),
+                    );
+                }
+                InputAction::Forwardtab | InputAction::Backtab => {
+                    let previous = self
+                        .edit
+                        .buffer()
+                        .line(position.row)
+                        .unwrap_or("")
+                        .to_owned();
+                    let mut prefix = self.prefix.clone();
+                    let remaining = self.remaining;
+                    self.edit.atomic_input(|edit| {
+                        edit.apply_input(action)?;
+                        if edit.buffer().line(position.row).unwrap_or("") != previous {
+                            prefix = edit
+                                .buffer()
+                                .line(edit.cursor().row)
+                                .unwrap_or("")
+                                .chars()
+                                .take(edit.cursor().column)
+                                .collect();
+                            // Indentation controls can generate more bytes than
+                            // the key's recipe cost, so bound pending copies too.
+                            check_work(prefix.len().checked_add(1), remaining)?;
+                        }
+                        Ok(())
+                    })?;
+                    self.prefix = prefix;
                 }
                 _ => self.edit.apply_input(action)?,
             }
