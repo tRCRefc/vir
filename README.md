@@ -207,7 +207,7 @@ target/release/vir --vi notes.txt
 
 ### 输入、缩进和粘贴
 
-- Insert/change/R 中 Enter、Tab、Backspace/Delete 可编辑文本；Insert/change 中 Ctrl-W 删除上一个输入词，Ctrl-U 清除到生成缩进或行首。
+- Insert/change/R 都支持 Enter、Tab 和 Backspace；R 中 Backspace 恢复本次会话的覆盖、追加或分行，Delete 被忽略。Insert/change 中 Delete 删除光标处字符或合并下一行，Ctrl-W 删除上一个输入词，Ctrl-U 清除到生成缩进或行首。
 - `Ctrl-V` 或 `Ctrl-Q` 引用下一个字符，可将 Esc、Ctrl-C 和换行作为文本输入；引用 NUL 会被拒绝。
 - `set ai` 开启自动缩进，复制当前行前导空格或 Tab。Ctrl-T/ Ctrl-D 按固定 8 列 tabstop 增减生成缩进；Ctrl-T 即使 `noai` 也可调整手工前导空白。Replace 模式不启用这些缩进控制。计数插入中，首个换行前被 Ctrl-T/D 重写的整段前导空白作为净输入重复；首个换行后自动生成的缩进只插入一次。
 - 支持终端 bracketed paste。普通模式下粘贴作为一次插入，Insert/change/R 中粘贴进入当前事务；粘贴内容按字面处理，CRLF/CR 规范化为 LF，单次事件上限 64 KiB。粘贴不会触发自动缩进。
