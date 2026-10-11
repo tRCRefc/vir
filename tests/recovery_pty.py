@@ -108,11 +108,19 @@ def ex_crash(directory):
 def normal_cleanup(directory):
     path = directory / "normal"
     path.write_text("old\n")
-    for script in ["a\nnew\n.\nw\nq\n", "a\ndiscard\n.\nq!\n", "a\neof\n"]:
+    for script in ["a\nnew\n.\nw\nq\n", "a\ndiscard\n.\nq!\n"]:
         result = subprocess.run([str(BINARY), "--ex", str(path)], input=script,
                                 text=True, capture_output=True, env=environment(directory), timeout=5)
         assert result.returncode == 0, result.stderr
         assert not list(directory.glob(".vir-recovery-*"))
+    assert path.read_text() == "old\nnew\n"
+    result = subprocess.run([str(BINARY), "--ex", str(path)], input="a\neof\npartial",
+                            text=True, capture_output=True, env=environment(directory), timeout=5)
+    assert result.returncode == 0 and result.stdout == ""
+    assert "Recovery snapshot retained at" in result.stderr
+    snapshots = list(directory.glob(".vir-recovery-*"))
+    assert len(snapshots) == 1
+    restore(snapshots[0], directory / "eof-restored", directory, b"old\nnew\neof\n")
     assert path.read_text() == "old\nnew\n"
 
 

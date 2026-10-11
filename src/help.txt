@@ -78,7 +78,9 @@ Behavior and limits:
 - q/wq warn once about remaining startup files; a second quit can exit.
 - Command errors print '? ...' and continue. Script exit status can still
   be zero. EOF exits without saving, even with unsaved changes; input EOF
-  keeps complete input lines but discards an unterminated final input line.
+  commits complete input lines but discards an unterminated final input line.
+  Unsaved text retains its last successful recovery snapshot on EOF; the CLI
+  reports its path on stderr. Use q! to deliberately discard it.
 - Saves stage and sync a temporary file before publication. Links and
   unsupported permissions are rejected. ACLs/xattrs are not preserved;
   directory crash durability is not guaranteed. Saves reject changes since
@@ -358,9 +360,11 @@ Crash recovery:
   granting overwrite rights to the original. Undo/registers/cursor are not restored.
 - The selected source snapshot stays intact; remove it manually after checking
   the recovered text. Listed snapshots may belong to running sessions.
-- Successful full saves/exports, reloads and deliberate normal exits clean this
-  session's snapshot. q! and ex EOF deliberately discard unsaved recovery data.
-  Errors, panics and process kills retain the last completed checkpoint.
+- Successful full saves/exports, reloads and explicit quit commands clean this
+  session's snapshot. q! deliberately discards unsaved recovery data.
+  ex EOF retains unsaved recovery data and reports the snapshot path on stderr;
+  scripts that intend to discard edits should end with q! instead.
+  Errors, panics and process kills also retain the last completed checkpoint.
 - Recovery I/O failures are shown and do not block editing or saving. Only the
   last successful checkpoint is recoverable; input not yet processed is not.
 - Snapshots are limited to 128 MiB, use full-text writes and sync on each change.

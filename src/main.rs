@@ -108,6 +108,11 @@ fn run_editor(mode: &str, args: &[OsString]) -> io::Result<()> {
             prompt,
             &mut recovery,
         )?;
-        recovery.finish()
+        if let Some(path) = recovery.path() {
+            eprintln!(
+                "Recovery snapshot retained at {path:?}; use --ex --recover SNAPSHOT to reopen it."
+            );
+        }
+        Ok(())
     }
 }

@@ -25,7 +25,8 @@ pub fn run_with_prompt<R: BufRead, W: Write>(
     run_with_recovery(input, output, editor, prompt, &mut Recovery::disabled())
 }
 
-/// CLI session with explicit recovery ownership. Errors retain the last checkpoint.
+/// CLI session with explicit recovery ownership. EOF and errors retain the last
+/// checkpoint; an explicit successful quit cleans up this session's snapshot.
 pub fn run_with_recovery<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -96,6 +97,7 @@ pub fn run_with_recovery<R: BufRead, W: Write>(
                 output.write_all(result.output.as_bytes())?;
                 output.flush()?;
                 if result.quit {
+                    recovery.finish()?;
                     return Ok(());
                 }
             }

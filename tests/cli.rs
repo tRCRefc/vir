@@ -113,8 +113,18 @@ fn ex_script_eof_does_not_implicitly_save() {
     let output = run(&["--ex", path.to_str().unwrap()], b"a\nunsaved\npartial");
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("Recovery snapshot retained at")
+    );
     assert_eq!(std::fs::read_to_string(path).unwrap(), "original\n");
+    let snapshots = vir::recovery::list(dir.path()).unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        vir::recovery::read(&snapshots[0]).unwrap().buffer.to_text(),
+        "original\nunsaved\n"
+    );
 }
 
 #[test]
