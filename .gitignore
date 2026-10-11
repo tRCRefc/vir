@@ -1,6 +1,7 @@
 /target
 /*.md
 !README.md
+!AGENTS.md
 
-# Local Agent guidance and research; keep out of Git.
+# Local design manuals, research, and session records; keep out of Git.
 /docs/
