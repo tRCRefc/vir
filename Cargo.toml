@@ -2,6 +2,7 @@
 name = "vir"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 
 [dependencies]
 tempfile = "3.27"

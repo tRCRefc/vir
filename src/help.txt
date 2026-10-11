@@ -295,11 +295,14 @@ Replace restoration add no expansion cost, so the limit does not block
 correction. Counted input/replay also allow at most 1,000,000 recorded
 actions; corrections after the first LF do not refund earlier input cost.
 Larger counts or recipes fail before editing. No terminal escape sequences are replayed.
+Before counted Insert consumes its first LF, indentation rewritten by Ctrl-T/D
+is part of the repeated net text. Indentation generated after that LF is not repeated.
 Visual register put and its dot replay allow at most 1,000,000 expanded
 UTF-8 bytes, counting one separator byte per register line (including empty
 lines). Empty registers and larger expansions fail before editing.
 Type : to enter w [path], q, q!, wq [path], e[!] [path], f [path],
-d, yank [reg], put [reg], u, set ai/noai, or s/pattern/replacement/[g];
+d, join, read [path], move address, copy address, yank [reg], put [reg],
+u, set ai/noai, or s/pattern/replacement/[g];
 addresses and ranges follow ex semantics, including 0put before the first line.
 Successful edits/loads move to the resulting ex line at column 1.
 The status line shows [+] for unsaved changes. Enter executes; Backspace
