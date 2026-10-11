@@ -53,9 +53,44 @@ def saved_input(directory, label, original, setup, keys, expected):
         os.close(slave)
 
 
+def rejected_change(directory, label, original, keys):
+    path = directory / label
+    path.write_text(original)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 100, 0, 0))
+    attributes = termios.tcgetattr(slave)
+    process = subprocess.Popen(
+        [str(BINARY), "--vi", str(path)], stdin=slave, stdout=slave,
+        stderr=subprocess.PIPE, env=dict(os.environ, VIR_RECOVERY_DIR=str(directory)),
+    )
+    try:
+        receive(master, b"[VIEW]")
+        os.write(master, keys)
+        receive(master, b"invalid register")
+        # Rejection must stay in Normal so the next i starts an independent edit.
+        os.write(master, b"iX\x1b")
+        receive(master, b"[VIEW] [+]")
+        os.write(master, b":wq\r")
+        receive(master, b"\x1b[?1049l")
+        assert process.wait(timeout=5) == 0
+        assert process.stderr.read() == b""
+        assert path.read_text() == "X\n", (label, repr(path.read_text()))
+        assert termios.tcgetattr(slave) == attributes
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        os.close(master)
+        os.close(slave)
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="vir-input-regression-") as name:
         directory = Path(name)
+        for original, label in [("", "empty"), ("\n", "blank")]:
+            for command in ["cc", "S", "C"]:
+                rejected_change(directory, f"invalid-{label}-{command}", original,
+                                f'"1{command}'.encode())
         for label, keys, expected in [
             ("ctrl-u", b"3iabc\x15X\x1b", "XXXtail\n"),
             ("ctrl-w", b"3ione two\x17X\x1b", "one Xone Xone Xtail\n"),

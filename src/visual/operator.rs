@@ -649,6 +649,7 @@ impl VisualState {
         selected: Option<char>,
         save_numbered: bool,
     ) -> Result<TextEdit<'a>, String> {
+        validate_write_register(selected)?;
         if matches!(motion, Some(Motion::End)) && count.unwrap_or(1) <= 1 {
             return self.begin_insert_register(editor, 'C', selected);
         }

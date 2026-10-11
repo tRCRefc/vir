@@ -145,7 +145,7 @@ impl InputStart {
                         .chars()
                         .count()
                 {
-                    state.begin_insert(editor, 'a')
+                    state.begin_insert_register(editor, 'a', register)
                 } else {
                     state.begin_change_register(editor, Some(Motion::End), Some(count), register)
                 }

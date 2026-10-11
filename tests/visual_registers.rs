@@ -604,3 +604,78 @@ fn unnamed_and_numbered_put_preflight_preserves_history_and_dot_selection() {
         assert_eq!(format!("{state:?}"), view);
     }
 }
+
+#[test]
+fn change_validates_write_registers_before_empty_buffer_and_line_shortcuts() {
+    for original in ["", "\n", "abc\n"] {
+        for count in [1, 3] {
+            for name in ['1', '9', '!', '中'] {
+                let mut editor = Editor::from_buffer(TextBuffer::from_text(original).unwrap());
+                editor
+                    .set_named_register('a', Register::Characters("saved".into()), false)
+                    .unwrap();
+                let state = VisualState::default();
+                let before = editor.clone();
+                let error = state
+                    .begin_change_register(&mut editor, None, Some(count), Some(name))
+                    .err();
+                assert_eq!(error.as_deref(), Some("invalid register"));
+                assert_eq!(editor, before);
+                let error = state
+                    .begin_counted_insert_register(&mut editor, 'C', count, Some(name))
+                    .err();
+                assert_eq!(error.as_deref(), Some("invalid register"));
+                assert_eq!(editor, before);
+            }
+        }
+    }
+}
+
+#[test]
+fn empty_changes_keep_valid_named_registers_without_capturing_absent_text() {
+    use vir::editor::InputAction;
+    for mode in ['S', 'C'] {
+        for name in ['a', 'A'] {
+            let mut editor = Editor::default();
+            editor
+                .set_named_register('a', Register::Characters("saved".into()), false)
+                .unwrap();
+            let mut state = VisualState::default();
+            if mode == 'S' {
+                let mut edit = state
+                    .begin_change_register(&mut editor, None, None, Some(name))
+                    .unwrap();
+                edit.insert("X").unwrap();
+                state
+                    .commit_input(
+                        edit,
+                        vir::visual::InputStart::ChangeNamed {
+                            motion: None,
+                            count: None,
+                            register: name,
+                        },
+                    )
+                    .unwrap();
+            } else {
+                let mut input = state
+                    .begin_counted_insert_register(&mut editor, 'C', 1, Some(name))
+                    .unwrap();
+                input.apply_input(&InputAction::Insert("X".into())).unwrap();
+                input.commit(&mut state).unwrap();
+            }
+            assert_eq!(editor.buffer().to_text(), "X\n");
+            assert_eq!(
+                editor.named_register('a'),
+                Some(&Register::Characters("saved".into()))
+            );
+            state.undo(&mut editor).unwrap();
+            assert!(editor.buffer().is_empty());
+            state.repeat_change(&mut editor, None).unwrap();
+            assert_eq!(editor.buffer().to_text(), "X\n");
+            assert_eq!(
+                editor.named_register('a'),
+                Some(&Register::Characters("saved".into()))
+            );
+        }
+    }
+}
